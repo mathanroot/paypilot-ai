@@ -28,7 +28,7 @@ interface CurrencyOption {
 }
 
 const CURRENCIES: CurrencyOption[] = [
-  { code: "USD", name: "United States Dollar (Initial Test)", symbol: "$" },
+  { code: "USD", name: "United States Dollar", symbol: "$" },
   { code: "EUR", name: "Euro", symbol: "€" },
   { code: "GBP", name: "British Pound", symbol: "£" },
   { code: "CAD", name: "Canadian Dollar", symbol: "C$" },
@@ -163,39 +163,6 @@ export default function CheckoutPage() {
           </div>
         </div>
 
-        {/* Currency Mismatch & Sandbox Setup Diagnostic Guide */}
-        <div className="p-5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-slate-300 space-y-3">
-          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-            <Info className="w-4 h-4 shrink-0" />
-            <span>How to Fix &quot;This seller doesn&apos;t accept payments in your currency&quot; in Sandbox</span>
-          </div>
-          <p className="leading-relaxed">
-            PayPal throws code <code className="px-1.5 py-0.5 rounded bg-black/40 text-amber-300 font-mono">UNSUPPORTED_CURRENCY</code> when the seller account in Sandbox does not hold USD balance or blocks foreign currency conversion:
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-            <div className="p-3 rounded-lg bg-[#080D1A] border border-surface-border space-y-1.5">
-              <span className="font-bold text-cyan-300">Solution A (Recommended):</span>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
-                Log into <a href="https://sandbox.paypal.com" target="_blank" rel="noreferrer" className="text-accent-cyan underline">sandbox.paypal.com</a> with seller account <code className="text-white">sb-j8yz353762209@business.example.com</code>:
-              </p>
-              <ul className="list-disc pl-4 text-[11px] text-slate-400 space-y-0.5">
-                <li>Go to <strong>Wallet</strong> &rarr; click <strong>Add a currency</strong> &rarr; select <strong>USD</strong> &rarr; Add Currency.</li>
-                <li>Go to <strong>Account Settings</strong> &rarr; <strong>Payment Preferences</strong> &rarr; <strong>Block Payments</strong> &rarr; set <em>&quot;Allow payments sent to me in a currency I do not hold&quot;</em> to <strong>Yes, accept and convert to U.S. Dollars</strong>.</li>
-              </ul>
-            </div>
-            <div className="p-3 rounded-lg bg-[#080D1A] border border-surface-border space-y-1.5">
-              <span className="font-bold text-cyan-300">Solution B (Instant US Buyer Account):</span>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
-                In your <a href="https://developer.paypal.com/dashboard/accounts" target="_blank" rel="noreferrer" className="text-accent-cyan underline">PayPal Developer Dashboard</a> under <strong>Testing Tools &rarr; Sandbox Accounts</strong>:
-              </p>
-              <ul className="list-disc pl-4 text-[11px] text-slate-400 space-y-0.5">
-                <li>Check your Personal (Buyer) account country.</li>
-                <li>If the buyer account is registered in India, click <strong>Create Account</strong> &rarr; select <strong>Personal</strong> &rarr; Country: <strong>United States</strong>.</li>
-                <li>Log into PayPal checkout with the US Sandbox Personal account.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
 
         {/* 4-Step Lifecycle Indicator */}
         <div className="grid grid-cols-4 gap-2 text-center text-xs">
@@ -281,7 +248,7 @@ export default function CheckoutPage() {
                     />
                   </div>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Initial test amount: <strong>10.00 USD</strong>.
+                    Settlement amount: <strong>{currency} {Number(amount || 0).toFixed(2)}</strong>
                   </p>
                 </div>
 
@@ -300,7 +267,7 @@ export default function CheckoutPage() {
               {/* Official PayPal JS SDK Button Container (Safely Isolated) */}
               <div className="pt-4 border-t border-surface-border/60 space-y-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Instant PayPal Checkout (Official JS SDK Buttons):
+                  Instant PayPal Checkout:
                 </span>
                 <div className="max-w-sm mx-auto">
                   {paypalConfig?.clientId && (
