@@ -1,0 +1,223 @@
+// Prisma schema for PayPilot AI
+// Supports SQLite for fast local development & test suite, and PostgreSQL for production (Render / Neon / Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String           @id @default(uuid())
+  email        String           @unique
+  passwordHash String
+  name         String
+  role         String           @default("MERCHANT_ADMIN") // MERCHANT_ADMIN, OPERATOR, VIEWER
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  merchant     MerchantAccount?
+}
+
+model MerchantAccount {
+  id               String            @id @default(uuid())
+  userId           String            @unique
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName     String
+  businessEmail    String
+  currency         String            @default("USD")
+  paypalEmail      String?
+  paypalMerchantId String?
+  sandboxMode      Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  customers        Customer[]
+  products         Product[]
+  payments         Payment[]
+  invoices         Invoice[]
+  refunds          Refund[]
+  conversations    AIConversation[]
+  approvalRequests ApprovalRequest[]
+  fraudAlerts      FraudAlert[]
+  auditLogs        AuditLog[]
+}
+
+model Customer {
+  id          String          @id @default(uuid())
+  merchantId  String
+  merchant    MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name        String
+  email       String
+  phone       String?
+  company     String?
+  status      String          @default("ACTIVE") // ACTIVE, OVERDUE, CHURNED
+  totalSpent  Float           @default(0.0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  payments    Payment[]
+  invoices    Invoice[]
+}
+
+model Product {
+  id          String          @id @default(uuid())
+  merchantId  String
+  merchant    MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Float
+  currency    String          @default("USD")
+  sku         String?
+  status      String          @default("ACTIVE")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model Payment {
+  id              String          @id @default(uuid())
+  merchantId      String
+  merchant        MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customerId      String?
+  customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  paypalOrderId   String          @unique
+  paypalCaptureId String?         @unique
+  amount          Float
+  currency        String          @default("USD")
+  status          String          @default("CREATED") // CREATED, APPROVED, COMPLETED, FAILED, REFUNDED, PARTIALLY_REFUNDED
+  paymentMethod   String          @default("PAYPAL")
+  description     String?
+  idempotencyKey  String?         @unique
+  riskScore       Int             @default(5) // 0-100
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  events          PaymentEvent[]
+  refunds         Refund[]
+  fraudAlerts     FraudAlert[]
+}
+
+model PaymentEvent {
+  id         String   @id @default(uuid())
+  paymentId  String
+  payment    Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  eventType  String   // ORDER_CREATED, ORDER_APPROVED, CAPTURE_COMPLETED, CAPTURE_DENIED, REFUND_COMPLETED
+  status     String
+  rawPayload String?  // JSON stringified payload
+  timestamp  DateTime @default(now())
+}
+
+model Invoice {
+  id              String          @id @default(uuid())
+  merchantId      String
+  merchant        MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customerId      String
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoiceNumber   String          @unique
+  amount          Float
+  currency        String          @default("USD")
+  dueDate         DateTime
+  status          String          @default("UNPAID") // UNPAID, OVERDUE, PAID, CANCELLED
+  reminderCount   Int             @default(0)
+  lastReminderAt  DateTime?
+  paypalInvoiceId String?
+  paymentLink     String?
+  itemsSummary    String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model Refund {
+  id             String          @id @default(uuid())
+  paymentId      String
+  payment        Payment         @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  merchantId     String
+  merchant       MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  paypalRefundId String?         @unique
+  amount         Float
+  currency       String          @default("USD")
+  reason         String
+  status         String          @default("PENDING") // PENDING, APPROVED, REJECTED, COMPLETED, FAILED
+  aiRecommended  Boolean         @default(false)
+  aiConfidence   Float?
+  approvedBy     String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model AIConversation {
+  id         String          @id @default(uuid())
+  merchantId String
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  title      String          @default("New Session")
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  logs       AIActivityLog[]
+}
+
+model AIActivityLog {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  merchantId     String
+  role           String         // user, assistant, system, tool
+  content        String
+  toolCalls      String?        // JSON string of tool calls
+  toolResults    String?        // JSON string of execution results
+  latencyMs      Int?
+  createdAt      DateTime       @default(now())
+}
+
+model ApprovalRequest {
+  id          String          @id @default(uuid())
+  merchantId  String
+  merchant    MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  actionType  String          // CAPTURE_PAYMENT, EXECUTE_REFUND, SEND_REMINDER, HIGH_VALUE_TRANSFER
+  targetId    String?         // Reference to invoice/payment/refund
+  title       String
+  description String
+  payload     String          // JSON encoded parameters for the tool action
+  status      String          @default("PENDING") // PENDING, APPROVED, REJECTED, EXPIRED, EXECUTED
+  requestedBy String          @default("AI_ASSISTANT")
+  approvedAt  DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime        @default(now())
+}
+
+model FraudAlert {
+  id                String          @id @default(uuid())
+  merchantId        String
+  merchant          MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  paymentId         String?
+  payment           Payment?        @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  riskScore         Int             // 0-100
+  riskLevel         String          // LOW, MEDIUM, HIGH, CRITICAL
+  reason            String
+  recommendedAction String
+  status            String          @default("ACTIVE") // ACTIVE, UNDER_REVIEW, RESOLVED, DISMISSED
+  resolvedAt        DateTime?
+  createdAt         DateTime        @default(now())
+}
+
+model WebhookEvent {
+  id           String    @id @default(uuid())
+  eventId      String    @unique // PayPal WH event ID
+  eventType    String    // e.g. PAYMENT.CAPTURE.COMPLETED
+  resourceType String?   // capture, order, etc.
+  payload      String    // JSON string
+  verified     Boolean   @default(false)
+  processed    Boolean   @default(false)
+  processedAt  DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+model AuditLog {
+  id         String          @id @default(uuid())
+  merchantId String
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  actor      String          // USER:email, AI_AGENT, SYSTEM_WEBHOOK
+  action     String          // ORDER_CREATED, PAYMENT_CAPTURED, REFUND_ISSUED, REMINDER_DISPATCHED
+  resource   String          // payments, refunds, invoices, auth
+  details    String          // JSON or human readable details
+  ipAddress  String?
+  createdAt  DateTime        @default(now())
+}
