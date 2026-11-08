@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import Link from "next/link";
 import {
@@ -16,8 +16,10 @@ import {
   Info,
   Globe,
   Lock,
+  ChevronRight,
+  Check,
 } from "lucide-react";
-import { loadScript } from "@paypal/paypal-js";
+import PayPalButton from "@/components/PayPalButton";
 
 interface CurrencyOption {
   code: string;
@@ -35,20 +37,15 @@ const CURRENCIES: CurrencyOption[] = [
 
 export default function CheckoutPage() {
   const [currency, setCurrency] = useState<string>("USD");
-  const [amount, setAmount] = useState<string>("10.00"); // Requirement 5: USD 10.00 default initial test
+  const [amount, setAmount] = useState<string>("10.00");
   const [description, setDescription] = useState<string>("PayPilot AI FinTech Verification Payment");
 
-  // Workflow states: "IDLE" | "CREATING" | "ORDER_CREATED" | "CAPTURING" | "COMPLETED" | "ERROR"
   const [step, setStep] = useState<"IDLE" | "CREATING" | "ORDER_CREATED" | "CAPTURING" | "COMPLETED" | "ERROR">("IDLE");
   const [orderData, setOrderData] = useState<any>(null);
   const [captureData, setCaptureData] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [paypalConfig, setPaypalConfig] = useState<any>(null);
-  const [sdkLoading, setSdkLoading] = useState(false);
 
-  const paypalButtonContainerRef = useRef<HTMLDivElement>(null);
-
-  // Fetch PayPal runtime configuration
   useEffect(() => {
     fetch("/api/paypal/config")
       .then((res) => res.json())
@@ -56,104 +53,6 @@ export default function CheckoutPage() {
       .catch((err) => console.error("Failed to load PayPal config", err));
   }, []);
 
-  // Initialize or re-initialize PayPal JS SDK when currency or client ID changes
-  useEffect(() => {
-    if (!paypalConfig?.clientId || paypalConfig.clientId === "sb-demo-client-id") return;
-    if (step !== "IDLE" && step !== "ERROR") return;
-
-    let isMounted = true;
-    setSdkLoading(true);
-
-    loadScript({
-      clientId: paypalConfig.clientId,
-      currency: currency,
-      intent: "capture",
-      components: "buttons",
-    })
-      .then((paypal) => {
-        if (!isMounted || !paypal || !paypal.Buttons) return;
-
-        if (paypalButtonContainerRef.current) {
-          paypalButtonContainerRef.current.innerHTML = "";
-
-          paypal.Buttons({
-            style: {
-              layout: "vertical",
-              color: "blue",
-              shape: "rect",
-              label: "paypal",
-            },
-            createOrder: async () => {
-              setStep("CREATING");
-              setErrorMessage(null);
-              try {
-                const res = await fetch("/api/paypal/create-order", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    amount: Number(amount),
-                    currency: currency,
-                    description: description,
-                  }),
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                  throw new Error(data.error || "Failed to create order");
-                }
-                setOrderData(data);
-                setStep("ORDER_CREATED");
-                return data.orderId;
-              } catch (err: any) {
-                setErrorMessage(err.message);
-                setStep("ERROR");
-                throw err;
-              }
-            },
-            onApprove: async (data: any) => {
-              setStep("CAPTURING");
-              try {
-                const res = await fetch("/api/paypal/capture-order", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    orderId: data.orderID,
-                    idempotencyKey: `IDEMP-${data.orderID}-${Date.now()}`,
-                  }),
-                });
-                const captureRes = await res.json();
-                if (!res.ok) {
-                  throw new Error(captureRes.error || "Capture verification failed");
-                }
-                setCaptureData(captureRes);
-                setStep("COMPLETED");
-              } catch (err: any) {
-                setErrorMessage(err.message);
-                setStep("ERROR");
-              }
-            },
-            onError: (err: any) => {
-              console.error("[PayPal JS SDK Error]:", err);
-              setErrorMessage(
-                `PayPal Checkout encountered an error: ${err?.message || "Please check buyer currency compatibility."}`
-              );
-              setStep("ERROR");
-            },
-          }).render(paypalButtonContainerRef.current);
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to load PayPal JS SDK", err);
-      })
-      .finally(() => {
-        if (isMounted) setSdkLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [paypalConfig, currency, amount, description, step]);
-
-  // Manual fallback: Create Order via REST API
   const handleCreateOrderManual = async () => {
     setStep("CREATING");
     setErrorMessage(null);
@@ -164,7 +63,7 @@ export default function CheckoutPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: Number(amount),
-          currency: currency,
+          currency: currency.toUpperCase(),
           description: description,
         }),
       });
@@ -182,7 +81,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // Manual Capture execution
   const handleCaptureOrderManual = async () => {
     if (!orderData?.orderId) return;
     setStep("CAPTURING");
@@ -194,7 +92,7 @@ export default function CheckoutPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId: orderData.orderId,
-          idempotencyKey: `IDEMP-${Date.now()}`,
+          idempotencyKey: `IDEMP-${orderData.orderId}-${Date.now()}`,
         }),
       });
 
@@ -265,26 +163,38 @@ export default function CheckoutPage() {
           </div>
         </div>
 
-        {/* Currency Mismatch Troubleshooting Notice */}
-        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-slate-300 space-y-2">
-          <div className="flex items-center gap-2 text-amber-400 font-bold">
+        {/* Currency Mismatch & Sandbox Setup Diagnostic Guide */}
+        <div className="p-5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-slate-300 space-y-3">
+          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
             <Info className="w-4 h-4 shrink-0" />
-            <span>Important Sandbox Buyer Account Tip</span>
+            <span>How to Fix &quot;This seller doesn&apos;t accept payments in your currency&quot; in Sandbox</span>
           </div>
           <p className="leading-relaxed">
-            If you see <span className="text-amber-300 font-semibold">&quot;We&apos;re sorry. This seller doesn&apos;t accept payments in your currency&quot;</span> when checking out:
+            PayPal throws code <code className="px-1.5 py-0.5 rounded bg-black/40 text-amber-300 font-mono">UNSUPPORTED_CURRENCY</code> when the seller account in Sandbox does not hold USD balance or blocks foreign currency conversion:
           </p>
-          <ul className="list-disc pl-5 space-y-1 text-slate-400 text-[11px]">
-            <li>
-              Log in with a <strong>Sandbox Personal Account</strong> whose country is <strong>United States</strong> (or match the selected currency).
-            </li>
-            <li>
-              Indian sandbox accounts cannot make domestic USD payments to Indian merchants due to regulatory restrictions. For international USD test payments, use a US-based sandbox buyer.
-            </li>
-            <li>
-              Alternatively, switch the currency selector below to test other supported currencies.
-            </li>
-          </ul>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            <div className="p-3 rounded-lg bg-[#080D1A] border border-surface-border space-y-1.5">
+              <span className="font-bold text-cyan-300">Solution A (Recommended):</span>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Log into <a href="https://sandbox.paypal.com" target="_blank" rel="noreferrer" className="text-accent-cyan underline">sandbox.paypal.com</a> with seller account <code className="text-white">sb-j8yz353762209@business.example.com</code>:
+              </p>
+              <ul className="list-disc pl-4 text-[11px] text-slate-400 space-y-0.5">
+                <li>Go to <strong>Wallet</strong> &rarr; click <strong>Add a currency</strong> &rarr; select <strong>USD</strong> &rarr; Add Currency.</li>
+                <li>Go to <strong>Account Settings</strong> &rarr; <strong>Payment Preferences</strong> &rarr; <strong>Block Payments</strong> &rarr; set <em>&quot;Allow payments sent to me in a currency I do not hold&quot;</em> to <strong>Yes, accept and convert to U.S. Dollars</strong>.</li>
+              </ul>
+            </div>
+            <div className="p-3 rounded-lg bg-[#080D1A] border border-surface-border space-y-1.5">
+              <span className="font-bold text-cyan-300">Solution B (Instant US Buyer Account):</span>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                In your <a href="https://developer.paypal.com/dashboard/accounts" target="_blank" rel="noreferrer" className="text-accent-cyan underline">PayPal Developer Dashboard</a> under <strong>Testing Tools &rarr; Sandbox Accounts</strong>:
+              </p>
+              <ul className="list-disc pl-4 text-[11px] text-slate-400 space-y-0.5">
+                <li>Check your Personal (Buyer) account country.</li>
+                <li>If the buyer account is registered in India, click <strong>Create Account</strong> &rarr; select <strong>Personal</strong> &rarr; Country: <strong>United States</strong>.</li>
+                <li>Log into PayPal checkout with the US Sandbox Personal account.</li>
+              </ul>
+            </div>
+          </div>
         </div>
 
         {/* 4-Step Lifecycle Indicator */}
@@ -328,7 +238,7 @@ export default function CheckoutPage() {
         </div>
 
         {/* Step: IDLE - Configure Currency & Amount */}
-        {(step === "IDLE" || step === "CREATING") && (
+        <div className={step === "IDLE" || step === "CREATING" ? "block" : "hidden"}>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5">
               <h3 className="font-bold text-base text-white">Configure Test Payment Parameters</h3>
@@ -387,17 +297,27 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Official PayPal JS SDK Button Container */}
+              {/* Official PayPal JS SDK Button Container (Safely Isolated) */}
               <div className="pt-4 border-t border-surface-border/60 space-y-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Instant PayPal Checkout (Official JS SDK):
+                  Instant PayPal Checkout (Official JS SDK Buttons):
                 </span>
-                <div ref={paypalButtonContainerRef} className="min-h-[45px] max-w-sm mx-auto">
-                  {sdkLoading && (
-                    <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                      <RefreshCw className="w-4 h-4 animate-spin text-primary" />
-                      <span>Loading PayPal Checkout SDK ({currency})...</span>
-                    </div>
+                <div className="max-w-sm mx-auto">
+                  {paypalConfig?.clientId && (
+                    <PayPalButton
+                      clientId={paypalConfig.clientId}
+                      currency={currency}
+                      amount={amount}
+                      description={description}
+                      onSuccess={(capture) => {
+                        setCaptureData(capture);
+                        setStep("COMPLETED");
+                      }}
+                      onError={(err) => {
+                        setErrorMessage(err);
+                        setStep("ERROR");
+                      }}
+                    />
                   )}
                 </div>
               </div>
@@ -445,7 +365,7 @@ export default function CheckoutPage() {
               </p>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Step: ORDER_CREATED - Awaiting approval & capture */}
         {step === "ORDER_CREATED" && orderData && (
