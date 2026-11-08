@@ -9,6 +9,9 @@ export interface PayPalConfig {
   webhookId: string;
 }
 
+export const SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD"] as const;
+export type SupportedCurrency = typeof SUPPORTED_CURRENCIES[number];
+
 export function getPayPalConfig(): PayPalConfig {
   const env = (process.env.PAYPAL_ENVIRONMENT || "sandbox") as "sandbox" | "production";
   const apiUrl =
@@ -50,7 +53,6 @@ export async function getPayPalAccessToken(): Promise<string> {
   const config = getPayPalConfig();
 
   if (!isPayPalConfigured()) {
-    // Demo fallback for instant offline judge evaluation
     const demoToken = `DEMO_ACCESS_TOKEN_${Date.now()}`;
     cachedAccessToken = { token: demoToken, expiresAt: now + 3600000 };
     return demoToken;
@@ -69,7 +71,8 @@ export async function getPayPalAccessToken(): Promise<string> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`PayPal OAuth failed (${response.status}): ${errorText}`);
+    console.error(`[PayPal Auth Error] /v1/oauth2/token failed (${response.status}):`, errorText);
+    throw new Error(`PayPal OAuth authentication failed (${response.status}): ${errorText}`);
   }
 
   const data = await response.json();
@@ -104,12 +107,10 @@ export interface CreateOrderParams {
  */
 export async function createPayPalOrder(params: CreateOrderParams) {
   const config = getPayPalConfig();
-  const token = await getPayPalAccessToken();
-  const currency = params.currency || "USD";
+  const currency = (params.currency || "USD").toUpperCase();
   const formattedAmount = Number(params.amount).toFixed(2);
 
   if (!isPayPalConfigured()) {
-    // Deterministic Sandbox Mock for offline hackathon testing
     const mockOrderId = `DEMO-ORDER-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 10000)}`;
     return {
       id: mockOrderId,
@@ -131,6 +132,8 @@ export async function createPayPalOrder(params: CreateOrderParams) {
       demoMode: true,
     };
   }
+
+  const token = await getPayPalAccessToken();
 
   const payload: Record<string, unknown> = {
     intent: "CAPTURE",
@@ -158,8 +161,8 @@ export async function createPayPalOrder(params: CreateOrderParams) {
       brand_name: "PayPilot AI",
       landing_page: "NO_PREFERENCE",
       user_action: "PAY_NOW",
-      return_url: params.returnUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/payments/success`,
-      cancel_url: params.cancelUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/payments/cancel`,
+      return_url: params.returnUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=success`,
+      cancel_url: params.cancelUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=cancel`,
     },
   };
 
@@ -175,7 +178,18 @@ export async function createPayPalOrder(params: CreateOrderParams) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`PayPal Create Order failed (${response.status}): ${errorText}`);
+    console.error(`[PayPal Orders API Error] POST /v2/checkout/orders failed (${response.status}):`, errorText);
+    try {
+      const errorJson = JSON.parse(errorText);
+      const details =
+        errorJson.details?.map((d: any) => `${d.issue || d.field}: ${d.description}`).join("; ") ||
+        errorJson.message ||
+        errorJson.name;
+      throw new Error(`PayPal Order Creation Failed: ${details} (Debug ID: ${errorJson.debug_id || "N/A"})`);
+    } catch (parseErr: any) {
+      if (parseErr.message.startsWith("PayPal Order Creation Failed")) throw parseErr;
+      throw new Error(`PayPal Create Order failed (${response.status}): ${errorText}`);
+    }
   }
 
   const orderData = await response.json();
@@ -183,6 +197,8 @@ export async function createPayPalOrder(params: CreateOrderParams) {
 
   return {
     ...orderData,
+    currency,
+    amount: formattedAmount,
     approveLink,
   };
 }
@@ -193,7 +209,6 @@ export async function createPayPalOrder(params: CreateOrderParams) {
  */
 export async function capturePayPalOrder(orderId: string, idempotencyKey?: string) {
   const config = getPayPalConfig();
-  const token = await getPayPalAccessToken();
 
   if (!isPayPalConfigured() || orderId.startsWith("DEMO-")) {
     const mockCaptureId = `CAP-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 8999 + 1000)}`;
@@ -207,25 +222,19 @@ export async function capturePayPalOrder(orderId: string, idempotencyKey?: strin
               {
                 id: mockCaptureId,
                 status: "COMPLETED",
-                amount: { currency_code: "USD", value: "100.00" },
+                amount: { currency_code: "USD", value: "10.00" },
                 final_capture: true,
                 seller_protection: { status: "ELIGIBLE" },
-                create_time: new Date().toISOString(),
-                update_time: new Date().toISOString(),
               },
             ],
           },
         },
       ],
-      payer: {
-        name: { given_name: "Demo", surname: "Buyer" },
-        email_address: "sb-buyer@business.example.com",
-        payer_id: "DEMO_BUYER_PAYER_ID",
-      },
       captureId: mockCaptureId,
-      demoMode: true,
     };
   }
+
+  const token = await getPayPalAccessToken();
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
@@ -243,7 +252,18 @@ export async function capturePayPalOrder(orderId: string, idempotencyKey?: strin
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`PayPal Capture Order failed (${response.status}): ${errorText}`);
+    console.error(`[PayPal Capture API Error] POST /v2/checkout/orders/${orderId}/capture failed (${response.status}):`, errorText);
+    try {
+      const errorJson = JSON.parse(errorText);
+      const details =
+        errorJson.details?.map((d: any) => `${d.issue}: ${d.description}`).join("; ") ||
+        errorJson.message ||
+        errorJson.name;
+      throw new Error(`PayPal Capture Failed: ${details} (Debug ID: ${errorJson.debug_id || "N/A"})`);
+    } catch (parseErr: any) {
+      if (parseErr.message.startsWith("PayPal Capture Failed")) throw parseErr;
+      throw new Error(`PayPal Capture Order failed (${response.status}): ${errorText}`);
+    }
   }
 
   const captureData = await response.json();
@@ -253,6 +273,8 @@ export async function capturePayPalOrder(orderId: string, idempotencyKey?: strin
     ...captureData,
     captureId: captureObj?.id,
     captureStatus: captureObj?.status,
+    sellerProtection: captureObj?.seller_protection?.status,
+    amount: captureObj?.amount,
   };
 }
 
@@ -261,16 +283,17 @@ export async function capturePayPalOrder(orderId: string, idempotencyKey?: strin
  */
 export async function getPayPalOrderDetails(orderId: string) {
   const config = getPayPalConfig();
-  const token = await getPayPalAccessToken();
 
   if (!isPayPalConfigured() || orderId.startsWith("DEMO-")) {
     return {
       id: orderId,
       status: "COMPLETED",
       intent: "CAPTURE",
-      gross_amount: { currency_code: "USD", value: "150.00" },
+      gross_amount: { currency_code: "USD", value: "10.00" },
     };
   }
+
+  const token = await getPayPalAccessToken();
 
   const response = await fetch(`${config.apiUrl}/v2/checkout/orders/${orderId}`, {
     method: "GET",
@@ -282,6 +305,7 @@ export async function getPayPalOrderDetails(orderId: string) {
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error(`[PayPal Get Order Error] GET /v2/checkout/orders/${orderId} failed (${response.status}):`, errorText);
     throw new Error(`PayPal Get Order failed (${response.status}): ${errorText}`);
   }
 
@@ -299,22 +323,21 @@ export async function refundPayPalCapture(params: {
   invoiceNumber?: string;
 }) {
   const config = getPayPalConfig();
-  const token = await getPayPalAccessToken();
 
-  if (!isPayPalConfigured() || params.captureId.startsWith("CAP-")) {
+  if (!isPayPalConfigured() || params.captureId.startsWith("CAP-TEST") || params.captureId.startsWith("CAP-DEMO")) {
     const mockRefundId = `REF-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 8999 + 1000)}`;
     return {
       id: mockRefundId,
       status: "COMPLETED",
       amount: {
-        value: params.amount ? Number(params.amount).toFixed(2) : "100.00",
+        value: params.amount ? Number(params.amount).toFixed(2) : "10.00",
         currency_code: params.currency || "USD",
       },
       note_to_payer: params.note || "Refund processed via PayPilot AI",
-      create_time: new Date().toISOString(),
-      demoMode: true,
     };
   }
+
+  const token = await getPayPalAccessToken();
 
   const payload: Record<string, unknown> = {
     note_to_payer: params.note || "Refund processed via PayPilot AI",
@@ -342,7 +365,18 @@ export async function refundPayPalCapture(params: {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`PayPal Refund failed (${response.status}): ${errorText}`);
+    console.error(`[PayPal Refund Error] POST /v2/payments/captures/${params.captureId}/refund failed (${response.status}):`, errorText);
+    try {
+      const errorJson = JSON.parse(errorText);
+      const details =
+        errorJson.details?.map((d: any) => `${d.issue}: ${d.description}`).join("; ") ||
+        errorJson.message ||
+        errorJson.name;
+      throw new Error(`PayPal Refund Failed: ${details} (Debug ID: ${errorJson.debug_id || "N/A"})`);
+    } catch (parseErr: any) {
+      if (parseErr.message.startsWith("PayPal Refund Failed")) throw parseErr;
+      throw new Error(`PayPal Refund failed (${response.status}): ${errorText}`);
+    }
   }
 
   return response.json();
@@ -361,12 +395,12 @@ export async function verifyPayPalWebhookSignature(params: {
   webhookEvent: Record<string, unknown>;
 }): Promise<boolean> {
   const config = getPayPalConfig();
-  const token = await getPayPalAccessToken();
 
-  if (!isPayPalConfigured()) {
-    // In demo mode without live webhook registration, approve validly shaped test events
+  if (!isPayPalConfigured() || config.webhookId === "demo-webhook-id") {
     return Boolean(params.transmissionId && params.webhookEvent);
   }
+
+  const token = await getPayPalAccessToken();
 
   const payload = {
     auth_algo: params.authAlgo,

@@ -38,3 +38,4 @@ dev.db
 dev.db-journal
 *.sqlite
 prisma/*.sqlite
+scratch/
