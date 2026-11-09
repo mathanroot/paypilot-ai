@@ -15,17 +15,28 @@ describe("AI Agent Tools & Backend Ledger Integration Suite", () => {
   it("should execute get_revenue_summary and calculate accurate financial metrics", async () => {
     if (!merchantId) return;
 
-    const summary = await executeAITool(
+    const summary30d = await executeAITool(
       "get_revenue_summary",
       { timeRange: "30d" },
       { merchantId, actorEmail: "merchant@paypilot.ai" }
     );
 
-    expect(summary).toBeDefined();
-    expect(summary.grossCapturedVolume).toBeGreaterThanOrEqual(0);
-    expect(summary.netRevenue).toBeDefined();
-    expect(summary.settlementRate).toContain("%");
-    expect(summary.outstandingReceivables).toBeGreaterThanOrEqual(0);
+    expect(summary30d).toBeDefined();
+    expect(summary30d.grossCapturedVolume).toBeGreaterThanOrEqual(0);
+    expect(summary30d.netRevenue).toBeDefined();
+    expect(summary30d.settlementRate).toContain("%");
+    expect(summary30d.outstandingReceivables).toBeGreaterThanOrEqual(0);
+
+    const summaryToday = await executeAITool(
+      "get_revenue_summary",
+      { timeRange: "today" },
+      { merchantId, actorEmail: "merchant@paypilot.ai" }
+    );
+
+    expect(summaryToday).toBeDefined();
+    expect(summaryToday.timeRange).toBe("today");
+    expect(summaryToday.grossCapturedVolume).toBeGreaterThanOrEqual(0);
+    expect(summaryToday.netRevenue).toBeDefined();
   });
 
   it("should retrieve overdue invoices via get_pending_invoices", async () => {

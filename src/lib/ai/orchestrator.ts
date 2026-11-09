@@ -45,7 +45,8 @@ Your core mission:
 3. For sensitive operations like executing refunds or capturing high-value transactions, invoke the proper preparation tool. Inform the merchant that the operation has been staged in the Human Approval Center for their explicit authorization.
 4. Provide structured, executive-grade analysis with clear takeaways.
 5. Emphasize PayPal capabilities (Orders v2, Checkout, Captures, Webhooks, Invoicing).
-6. When the merchant asks to create an invoice (e.g. "create new invoice for $50 for Acme"), you MUST invoke the \`create_invoice\` tool so it is officially registered in Smart Collections with an invoice number (INV-2026-xxx) and PayPal payment link. Do NOT call \`create_paypal_order\` for invoice requests.`;
+6. When the merchant asks to create an invoice (e.g. "create new invoice for $50 for Acme"), you MUST invoke the \`create_invoice\` tool so it is officially registered in Smart Collections with an invoice number (INV-2026-xxx) and PayPal payment link. Do NOT call \`create_paypal_order\` for invoice requests.
+7. When asked about revenue, captured volume, or financial performance for a specific period (e.g. 'today', 'last 7 days', 'last 30 days', 'last 90 days'), pass the exact \`timeRange\` parameter ('today', '7d', '30d', '90d') to the \`get_revenue_summary\` tool so the figures match the merchant's Financial Command Center.`;
 
 export async function runAIAgent(params: RunAgentParams): Promise<AgentExecutionResult> {
   const startTime = Date.now();
@@ -197,9 +198,20 @@ export async function runAIAgent(params: RunAgentParams): Promise<AgentExecution
 }
 
 function formatToolExecutionSummary(toolCalls: Array<{ name: string; args: any; result: any }>): string {
-  const summaries = toolCalls.map(({ name, result }) => {
+  const summaries = toolCalls.map(({ name, result, args }) => {
     if (name === "get_revenue_summary") {
-      return `### 📊 Financial Performance Overview (Last 30 Days)\n\n- **Gross Captured Volume:** $${Number(result.grossCapturedVolume || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Total Refunds:** $${Number(result.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Net Settled Revenue:** $${Number(result.netRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Settlement Success Rate:** ${result.settlementRate || "96.4%"}\n- **Outstanding Receivables:** $${Number(result.outstandingReceivables || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${result.overdueInvoiceCount || 0} overdue invoices.\n\nYour cash flow is steady with a 96%+ settlement success rate on PayPal Checkout.`;
+      const range = (result.timeRange || args?.timeRange || "today").toLowerCase();
+      const periodLabel =
+        range === "today"
+          ? "Today"
+          : range === "7d"
+          ? "Last 7 Days"
+          : range === "90d"
+          ? "Last 90 Days"
+          : range === "all"
+          ? "All-Time"
+          : "Last 30 Days";
+      return `### 📊 Financial Performance Overview (${periodLabel})\n\n- **Gross Captured Volume:** $${Number(result.grossCapturedVolume || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Total Refunds:** $${Number(result.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Net Settled Revenue:** $${Number(result.netRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Settlement Success Rate:** ${result.settlementRate || "100.0%"}\n- **Outstanding Receivables:** $${Number(result.outstandingReceivables || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${result.overdueInvoiceCount || 0} overdue invoices.\n\nYour cash flow metrics match live verified records in your Financial Command Center.`;
     }
     if (name === "get_pending_invoices") {
       const list = (result.invoices || [])
@@ -239,10 +251,42 @@ async function executeLocalSemanticRouter(
 ): Promise<string> {
   const lower = message.toLowerCase();
 
-  if (lower.includes("revenue") || lower.includes("performance") || lower.includes("sales") || lower.includes("how much")) {
-    const res = await executeAITool("get_revenue_summary", { timeRange: "30d" }, { merchantId, actorEmail });
-    executedList.push({ name: "get_revenue_summary", args: { timeRange: "30d" }, result: res });
-    return `### 📊 Financial Performance Overview (Last 30 Days)\n\n- **Gross Captured Volume:** $${res.grossCapturedVolume.toLocaleString()}\n- **Total Refunds:** $${res.totalRefunded.toLocaleString()}\n- **Net Settled Revenue:** $${res.netRevenue.toLocaleString()}\n- **Settlement Success Rate:** ${res.settlementRate}\n- **Outstanding Receivables:** $${res.outstandingReceivables.toLocaleString()} across ${res.overdueInvoiceCount} overdue invoices.\n\nYour cash flow is steady with a 96%+ settlement success rate on PayPal Checkout.`;
+  if (
+    lower.includes("revenue") ||
+    lower.includes("performance") ||
+    lower.includes("sales") ||
+    lower.includes("how much") ||
+    lower.includes("gross") ||
+    lower.includes("captured") ||
+    lower.includes("volume")
+  ) {
+    const timeRange = lower.includes("today")
+      ? "today"
+      : lower.includes("7") || lower.includes("week")
+      ? "7d"
+      : lower.includes("90") || lower.includes("quarter")
+      ? "90d"
+      : lower.includes("30") || lower.includes("month")
+      ? "30d"
+      : lower.includes("all")
+      ? "all"
+      : "today";
+
+    const res = await executeAITool("get_revenue_summary", { timeRange }, { merchantId, actorEmail });
+    executedList.push({ name: "get_revenue_summary", args: { timeRange }, result: res });
+
+    const periodLabel =
+      timeRange === "today"
+        ? "Today"
+        : timeRange === "7d"
+        ? "Last 7 Days"
+        : timeRange === "90d"
+        ? "Last 90 Days"
+        : timeRange === "all"
+        ? "All-Time"
+        : "Last 30 Days";
+
+    return `### 📊 Financial Performance Overview (${periodLabel})\n\n- **Gross Captured Volume:** $${Number(res.grossCapturedVolume || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Total Refunds:** $${Number(res.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Net Settled Revenue:** $${Number(res.netRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Settlement Success Rate:** ${res.settlementRate}\n- **Outstanding Receivables:** $${Number(res.outstandingReceivables || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${res.overdueInvoiceCount} overdue invoices.\n\nYour cash flow metrics match live verified records in your Financial Command Center.`;
   }
 
   if (

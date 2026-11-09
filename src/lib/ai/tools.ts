@@ -269,23 +269,48 @@ export async function executeAITool(
     }
 
     case "get_revenue_summary": {
+      const timeRange = (args.timeRange || "today").toLowerCase();
+      const now = new Date();
+      let startDate: Date | undefined;
+
+      if (timeRange === "today") {
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      } else if (timeRange === "7d") {
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (timeRange === "90d") {
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      } else if (timeRange === "30d") {
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+
+      const where: any = { merchantId };
+      if (startDate) {
+        where.createdAt = { gte: startDate };
+      }
+
       const payments = await prisma.payment.findMany({
-        where: { merchantId },
+        where,
         include: { refunds: true },
+        orderBy: { createdAt: "desc" },
       });
 
-      const totalCaptured = payments
-        .filter((p) => p.status === "COMPLETED" || p.status === "REFUNDED")
-        .reduce((sum, p) => sum + p.amount, 0);
+      const completedPayments = payments.filter(
+        (p) => p.status === "COMPLETED" || p.status === "REFUNDED"
+      );
+      const totalCaptured = completedPayments.reduce((sum, p) => sum + p.amount, 0);
 
       const totalRefunded = payments.reduce((sum, p) => {
         const refunded = p.refunds.reduce((rSum, r) => rSum + r.amount, 0);
         return sum + refunded;
       }, 0);
 
-      const netRevenue = totalCaptured - totalRefunded;
-      const successfulCount = payments.filter((p) => p.status === "COMPLETED").length;
-      const settlementRate = payments.length > 0 ? (successfulCount / payments.length) * 100 : 100;
+      const netRevenue = Math.max(0, totalCaptured - totalRefunded);
+
+      const successfulCount = completedPayments.length;
+      const pendingCount = payments.filter((p) => p.status === "CREATED" || p.status === "APPROVED").length;
+      const failedCount = payments.filter((p) => p.status === "FAILED").length;
+      const totalAttempts = successfulCount + pendingCount + failedCount;
+      const settlementRate = totalAttempts > 0 ? ((successfulCount / totalAttempts) * 100).toFixed(1) + "%" : "100.0%";
 
       const overdueInvoices = await prisma.invoice.findMany({
         where: { merchantId, status: "OVERDUE" },
@@ -293,10 +318,11 @@ export async function executeAITool(
       const outstandingReceivables = overdueInvoices.reduce((sum, i) => sum + i.amount, 0);
 
       return {
+        timeRange,
         grossCapturedVolume: totalCaptured,
         totalRefunded,
         netRevenue,
-        settlementRate: `${settlementRate.toFixed(1)}%`,
+        settlementRate,
         transactionCount: payments.length,
         outstandingReceivables,
         overdueInvoiceCount: overdueInvoices.length,
