@@ -22,6 +22,7 @@ import {
   X,
   History,
   Search,
+  Pencil,
 } from "lucide-react";
 import FormattedChatMessage from "@/components/FormattedChatMessage";
 
@@ -107,6 +108,8 @@ export default function AssistantPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -266,6 +269,94 @@ export default function AssistantPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Re-submit an edited user message and obtain fresh AI response
+  const handleUpdateAndResubmit = async (msgId: string, updatedText: string) => {
+    const trimmed = updatedText.trim();
+    if (!trimmed || loading) return;
+
+    const targetIdx = messages.findIndex((m) => m.id === msgId);
+    if (targetIdx === -1) return;
+
+    const previousMessages = messages.slice(0, targetIdx);
+    const updatedUserMsg: Message = {
+      ...messages[targetIdx],
+      content: trimmed,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    // Replace the message and clear downstream stale messages
+    setMessages([...previousMessages, updatedUserMsg]);
+    setEditingMsgId(null);
+    setEditText("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: trimmed, conversationId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to contact AI agent");
+      }
+
+      const activeId = data.conversationId;
+      if (activeId) {
+        setConversationId(activeId);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("paypilot_conversation_id", activeId);
+        }
+      }
+
+      const assistantMsg: Message = {
+        id: `ai-${Date.now()}`,
+        role: "assistant",
+        content: data.reply,
+        toolCalls: data.toolCallsExecuted,
+        latencyMs: data.latencyMs,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+      fetchConversations();
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: `⚠️ Error executing financial operation: ${err.message}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Only allow export toolbar when user asked for PDF/Excel/Report/Export
+  const checkIfExportRequested = (idx: number) => {
+    const prevMsg = idx > 0 ? messages[idx - 1] : null;
+    if (!prevMsg || prevMsg.role !== "user") return false;
+    const lower = prevMsg.content.toLowerCase();
+    return (
+      lower.includes("pdf") ||
+      lower.includes("excel") ||
+      lower.includes("xlsl") ||
+      lower.includes("xlsx") ||
+      lower.includes("sheet") ||
+      lower.includes("csv") ||
+      lower.includes("export") ||
+      (lower.includes("report") &&
+        (lower.includes("make") ||
+          lower.includes("download") ||
+          lower.includes("generate") ||
+          lower.includes("get")))
+    );
   };
 
   const activeConv = conversations.find((c) => c.id === conversationId);
@@ -431,7 +522,7 @@ export default function AssistantPage() {
 
           {/* Chat Messages Feed */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {messages.map((msg) => (
+            {messages.map((msg, idx) => (
               <div
                 key={msg.id}
                 className={`flex gap-3.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
@@ -457,9 +548,9 @@ export default function AssistantPage() {
                         <span>Backend Tools Executed ({msg.toolCalls.length}):</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {msg.toolCalls.map((tc, idx) => (
+                        {msg.toolCalls.map((tc, tcIdx) => (
                           <span
-                            key={idx}
+                            key={tcIdx}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#040711] border border-surface-border text-[11px] font-mono text-cyan-300"
                           >
                             <CheckCircle className="w-3 h-3 text-emerald-400" />
@@ -472,10 +563,56 @@ export default function AssistantPage() {
 
                   {/* Message Content with UI/UX Designer Rendering */}
                   {msg.role === "assistant" ? (
-                    <FormattedChatMessage content={msg.content} />
+                    <FormattedChatMessage
+                      content={msg.content}
+                      allowExport={checkIfExportRequested(idx)}
+                    />
+                  ) : editingMsgId === msg.id ? (
+                    /* Inline User Message Editor */
+                    <div className="space-y-2.5 min-w-[260px] sm:min-w-[340px]">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        className="w-full p-3 rounded-xl bg-[#090F24] border border-accent-cyan text-white text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-accent-cyan resize-none shadow-inner"
+                        rows={Math.max(2, Math.min(5, editText.split("\n").length + 1))}
+                        autoFocus
+                      />
+                      <div className="flex items-center justify-end gap-2 text-xs">
+                        <button
+                          onClick={() => {
+                            setEditingMsgId(null);
+                            setEditText("");
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 font-medium transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleUpdateAndResubmit(msg.id, editText)}
+                          disabled={!editText.trim() || loading}
+                          className="px-3.5 py-1.5 rounded-lg bg-accent-cyan hover:bg-cyan-400 text-slate-950 font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                        >
+                          <span>Update &amp; Ask AI</span>
+                          <Send className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   ) : (
-                    <div className="text-xs sm:text-sm whitespace-pre-line leading-relaxed font-medium">
-                      {msg.content}
+                    /* Display User Message with Edit Action */
+                    <div className="group/user relative">
+                      <div className="text-xs sm:text-sm whitespace-pre-line leading-relaxed font-medium pr-7">
+                        {msg.content}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditingMsgId(msg.id);
+                          setEditText(msg.content);
+                        }}
+                        className="absolute top-0 right-0 opacity-0 group-hover/user:opacity-100 transition-opacity p-1 rounded-md bg-black/25 hover:bg-black/50 text-indigo-100 hover:text-white"
+                        title="Edit this message"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   )}
 

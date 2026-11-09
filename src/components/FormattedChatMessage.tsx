@@ -24,9 +24,10 @@ import { exportToPdf, exportToExcel, exportToCsv, parseFinancialContent } from "
 
 interface FormattedChatMessageProps {
   content: string;
+  allowExport?: boolean;
 }
 
-export default function FormattedChatMessage({ content }: FormattedChatMessageProps) {
+export default function FormattedChatMessage({ content, allowExport = false }: FormattedChatMessageProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [exportingType, setExportingType] = useState<string | null>(null);
   const [exportedType, setExportedType] = useState<string | null>(null);
@@ -57,22 +58,12 @@ export default function FormattedChatMessage({ content }: FormattedChatMessagePr
     }
   };
 
-  // Determine if this message is a financial report or suitable for direct export
+  // Only show export toolbar when user explicitly requested a report / PDF / Excel / export
+  // Or when the message explicitly indicates a compiled downloadable report
   const isExportable =
-    content.toLowerCase().includes("gross") ||
-    content.toLowerCase().includes("volume") ||
-    content.toLowerCase().includes("revenue") ||
-    content.toLowerCase().includes("refund") ||
-    content.toLowerCase().includes("pdf") ||
-    content.toLowerCase().includes("excel") ||
-    content.toLowerCase().includes("sheet") ||
-    content.toLowerCase().includes("xlsl") ||
-    content.toLowerCase().includes("xlsx") ||
-    content.toLowerCase().includes("financial") ||
-    content.toLowerCase().includes("kpi") ||
-    content.toLowerCase().includes("settlement") ||
-    content.toLowerCase().includes("receivable") ||
-    content.toLowerCase().includes("report");
+    allowExport === true ||
+    (content.toLowerCase().includes("executive financial report") && content.toLowerCase().includes("1-click export")) ||
+    content.toLowerCase().includes("ready for direct download");
 
   // Check if content contains a Markdown Table
   const tableMatch = content.match(/\|[^\n]+\|\n\|[-|\s]+\|\n([\s\S]+?)(?=\n\n|\n\*\*Takeaway|\n\*\*What happens|\n###|$)/);
@@ -217,44 +208,46 @@ export default function FormattedChatMessage({ content }: FormattedChatMessagePr
               ))}
           </div>
 
-          {/* Instant Export Action Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-surface-border/60">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
-              <Download className="w-3.5 h-3.5 text-accent-cyan" />
-              <span>Export Report:</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => handleExport("pdf")}
-                disabled={exportingType === "pdf"}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F162A] hover:bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold shadow-sm transition-all active:scale-95"
-                title="Download verified PDF report"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>{exportedType === "pdf" ? "Downloaded PDF!" : "PDF Report"}</span>
-              </button>
+          {/* Instant Export Action Toolbar (Only when export requested) */}
+          {isExportable && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-surface-border/60">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+                <Download className="w-3.5 h-3.5 text-accent-cyan" />
+                <span>Export Report:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleExport("pdf")}
+                  disabled={exportingType === "pdf"}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F162A] hover:bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold shadow-sm transition-all active:scale-95"
+                  title="Download verified PDF report"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>{exportedType === "pdf" ? "Downloaded PDF!" : "PDF Report"}</span>
+                </button>
 
-              <button
-                onClick={() => handleExport("excel")}
-                disabled={exportingType === "excel"}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F162A] hover:bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold shadow-sm transition-all active:scale-95"
-                title="Download Excel spreadsheet (.xlsx)"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>{exportedType === "excel" ? "Downloaded .XLSX!" : "Excel (.xlsx)"}</span>
-              </button>
+                <button
+                  onClick={() => handleExport("excel")}
+                  disabled={exportingType === "excel"}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F162A] hover:bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold shadow-sm transition-all active:scale-95"
+                  title="Download Excel spreadsheet (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>{exportedType === "excel" ? "Downloaded .XLSX!" : "Excel (.xlsx)"}</span>
+                </button>
 
-              <button
-                onClick={() => handleExport("csv")}
-                disabled={exportingType === "csv"}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F162A] hover:bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-semibold shadow-sm transition-all active:scale-95"
-                title="Download CSV table"
-              >
-                <Table className="w-3.5 h-3.5" />
-                <span>{exportedType === "csv" ? "Downloaded CSV!" : "CSV"}</span>
-              </button>
+                <button
+                  onClick={() => handleExport("csv")}
+                  disabled={exportingType === "csv"}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F162A] hover:bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-semibold shadow-sm transition-all active:scale-95"
+                  title="Download CSV table"
+                >
+                  <Table className="w-3.5 h-3.5" />
+                  <span>{exportedType === "csv" ? "Downloaded CSV!" : "CSV"}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Trailing content (e.g. Takeaways, instructions) */}
@@ -268,7 +261,7 @@ export default function FormattedChatMessage({ content }: FormattedChatMessagePr
     <div className="space-y-3">
       {renderBodyMarkdown(content)}
 
-      {/* Render 1-click Download Bar whenever financial information is present */}
+      {/* Render 1-click Download Bar ONLY when export was explicitly requested */}
       {isExportable && (
         <div className="p-3 rounded-xl bg-gradient-to-r from-[#0B1426] via-[#090F1F] to-[#070A16] border border-surface-border/70 flex flex-wrap items-center justify-between gap-3 mt-3 shadow-lg">
           <div className="flex items-center gap-2">
@@ -318,15 +311,66 @@ export default function FormattedChatMessage({ content }: FormattedChatMessagePr
   );
 }
 
-// Renders paragraph blocks, bullet lists, callouts, and action buttons
+// Renders paragraph blocks, bullet lists, callouts, and clean UI components (no raw code dumps)
 function renderBodyMarkdown(text: string) {
   const paragraphs = text.split("\n\n");
 
   return paragraphs.map((para, idx) => {
     const trimmed = para.trim();
 
+    // Intercept code blocks (```json ... ``` or raw json dumps) and transform into clean UI parameter cards
+    if (
+      trimmed.startsWith("```") ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("json {") && trimmed.endsWith("}"))
+    ) {
+      let clean = trimmed.replace(/^```[a-z]*\n?/i, "").replace(/```$/, "").trim();
+      if (clean.startsWith("json ")) clean = clean.slice(5).trim();
+      try {
+        const parsed = JSON.parse(clean);
+        const flatEntries: Array<{ label: string; value: string }> = [];
+        const extractEntries = (obj: any, prefix = "") => {
+          if (!obj || typeof obj !== "object") return;
+          for (const [k, v] of Object.entries(obj)) {
+            const label = prefix ? `${prefix}.${k}` : k;
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              extractEntries(v, label);
+            } else if (!Array.isArray(v)) {
+              flatEntries.push({ label, value: String(v) });
+            }
+          }
+        };
+        extractEntries(parsed);
+
+        return (
+          <div key={idx} className="p-3.5 rounded-xl bg-[#070B16] border border-surface-border/60 space-y-2.5 my-2 shadow-md">
+            <div className="flex items-center gap-1.5 text-accent-cyan font-bold text-[10px] uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Verified Transaction Details</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              {flatEntries.slice(0, 10).map((entry, eIdx) => (
+                <div key={eIdx} className="p-2 rounded-lg bg-[#050812] border border-surface-border/40">
+                  <span className="text-[10px] text-slate-500 block uppercase font-mono">{entry.label}</span>
+                  <span className="font-mono text-cyan-300 font-semibold truncate block mt-0.5">
+                    {entry.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      } catch {
+        // If not valid JSON, render as plain styled text without monospace fences
+        return (
+          <p key={idx} className="text-xs sm:text-sm text-slate-200 leading-relaxed font-sans">
+            {renderInlineMarkdown(clean)}
+          </p>
+        );
+      }
+    }
+
     // Check if paragraph is telling the user to use Print -> Save as PDF or copy-paste into Word
-    // Transform into clean verified badge
     if (
       trimmed.includes("PDF Ready") ||
       trimmed.includes("Print -> Save as PDF") ||
