@@ -17,7 +17,7 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    // Check for expired pending actions and update them
+    // Check for expired pending actions or actions whose target invoice is already PAID
     const now = new Date();
     const updatedApprovals = await Promise.all(
       approvals.map(async (item) => {
@@ -28,6 +28,34 @@ export async function GET() {
           });
           return updated;
         }
+
+        // Auto-dismiss pending payment reminders if the target invoice is already PAID/settled
+        if (item.status === "PENDING" && item.actionType === "SEND_REMINDER") {
+          let payload: any = {};
+          try {
+            payload = JSON.parse(item.payload || "{}");
+          } catch {}
+          const invoiceId = payload.invoiceId || item.targetId;
+          if (invoiceId) {
+            const invoice = await prisma.invoice.findFirst({
+              where: {
+                merchantId: merchant.id,
+                OR: [{ id: invoiceId }, { invoiceNumber: invoiceId }],
+              },
+            });
+            if (invoice && invoice.status === "PAID") {
+              const updated = await prisma.approvalRequest.update({
+                where: { id: item.id },
+                data: {
+                  status: "COMPLETED",
+                  description: `Invoice ${invoice.invoiceNumber} is already settled and paid via PayPal Checkout. Reminder auto-dismissed.`,
+                },
+              });
+              return updated;
+            }
+          }
+        }
+
         return item;
       })
     );

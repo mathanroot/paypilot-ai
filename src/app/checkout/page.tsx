@@ -87,6 +87,22 @@ function CheckoutContent() {
               invoice: data.invoice,
             });
             setStep("COMPLETED");
+
+            // Broadcast to other open tabs that this order was captured
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem(
+                  "paypilot_last_captured_order",
+                  JSON.stringify({
+                    orderId: tokenParam,
+                    captureId: data.captureId || data.payment?.paypalCaptureId,
+                    amount: data.payment?.amount || amount,
+                    currency: data.payment?.currency || currency,
+                    timestamp: Date.now(),
+                  })
+                );
+              } catch {}
+            }
           } else {
             setErrorMessage(data.error || `Order ${tokenParam} status: ${data.status || "Unapproved"}`);
             setStep("ERROR");
@@ -101,6 +117,82 @@ function CheckoutContent() {
       setStep("ERROR");
     }
   }, [searchParams]);
+
+  // Real-time automatic polling & cross-tab synchronization while awaiting PayPal approval
+  useEffect(() => {
+    if (step !== "ORDER_CREATED" || !orderData?.orderId) return;
+
+    let isSubscribed = true;
+    const currentOrderId = orderData.orderId;
+
+    const checkOrderStatus = async () => {
+      try {
+        const res = await fetch("/api/paypal/sync-order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: currentOrderId }),
+        });
+        const data = await res.json();
+        if (!isSubscribed) return;
+
+        if (data.success && (data.status === "COMPLETED" || data.status === "ALREADY_COMPLETED" || data.captureId)) {
+          setCaptureData({
+            orderId: currentOrderId,
+            captureId: data.captureId || data.payment?.paypalCaptureId,
+            status: "COMPLETED",
+            amount: {
+              value: data.payment?.amount || orderData.amount || amount,
+              currency_code: data.payment?.currency || orderData.currency || currency,
+            },
+            invoice: data.invoice,
+          });
+          setStep("COMPLETED");
+        }
+      } catch (e) {
+        // Silent poll error
+      }
+    };
+
+    // Poll every 2.5 seconds
+    const interval = setInterval(checkOrderStatus, 2500);
+
+    // Also check immediately when window gains focus or visibility returns
+    const handleFocus = () => {
+      checkOrderStatus();
+    };
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus);
+
+    // Cross-tab storage listener (if another tab captured this order)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "paypilot_last_captured_order" && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed.orderId === currentOrderId) {
+            setCaptureData({
+              orderId: parsed.orderId,
+              captureId: parsed.captureId,
+              status: "COMPLETED",
+              amount: {
+                value: parsed.amount || amount,
+                currency_code: parsed.currency || currency,
+              },
+            });
+            setStep("COMPLETED");
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [step, orderData?.orderId]);
 
   const handleCreateOrderManual = async () => {
     setStep("CREATING");
@@ -211,43 +303,34 @@ function CheckoutContent() {
         </div>
       </div>
 
-      {/* 4-Step Lifecycle Indicator */}
-      <div className="grid grid-cols-4 gap-2 text-center text-xs">
+      {/* 3-Step Lifecycle Indicator */}
+      <div className="grid grid-cols-3 gap-3 text-center text-xs">
         <div
-          className={`p-2.5 rounded-xl border ${
+          className={`p-2.5 rounded-xl border transition-all ${
             step === "IDLE" || step === "CREATING"
-              ? "bg-primary/20 border-primary text-white font-semibold"
+              ? "bg-primary/20 border-primary text-white font-semibold shadow-md shadow-primary/10"
               : "bg-surface-card border-surface-border text-slate-400"
           }`}
         >
-          1. Amount &amp; Currency
+          1. Configure Payment
         </div>
         <div
-          className={`p-2.5 rounded-xl border ${
-            step === "ORDER_CREATED"
-              ? "bg-primary/20 border-primary text-white font-semibold"
+          className={`p-2.5 rounded-xl border transition-all ${
+            step === "ORDER_CREATED" || step === "CAPTURING"
+              ? "bg-primary/20 border-primary text-white font-semibold shadow-md shadow-primary/10"
               : "bg-surface-card border-surface-border text-slate-400"
           }`}
         >
-          2. PayPal Order v2
+          2. PayPal Secure Approval
         </div>
         <div
-          className={`p-2.5 rounded-xl border ${
-            step === "CAPTURING"
-              ? "bg-primary/20 border-primary text-white font-semibold"
-              : "bg-surface-card border-surface-border text-slate-400"
-          }`}
-        >
-          3. Server Capture
-        </div>
-        <div
-          className={`p-2.5 rounded-xl border ${
+          className={`p-2.5 rounded-xl border transition-all ${
             step === "COMPLETED"
-              ? "bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold"
+              ? "bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold shadow-md shadow-emerald-500/10"
               : "bg-surface-card border-surface-border text-slate-400"
           }`}
         >
-          4. Verified Receipt
+          3. Verified Settlement
         </div>
       </div>
 
@@ -255,19 +338,25 @@ function CheckoutContent() {
       <div className={step === "IDLE" || step === "CREATING" ? "block" : "hidden"}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5">
-            <h3 className="font-bold text-base text-white">Configure Test Payment Parameters</h3>
+            <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
+              <h3 className="font-bold text-base text-white">Payment Parameters</h3>
+              <span className="text-xs text-emerald-400 flex items-center gap-1.5 font-medium">
+                <ShieldCheck className="w-4 h-4" />
+                PayPal Developer Sandbox Verified
+              </span>
+            </div>
 
             <div className="space-y-4 text-xs">
               {/* Currency Selector */}
               <div>
                 <label className="text-slate-300 font-semibold flex items-center justify-between">
-                  <span>Payment Currency (Configurable):</span>
-                  <span className="text-[11px] text-accent-cyan font-mono">Syncs with Orders API &amp; SDK</span>
+                  <span>Payment Currency:</span>
+                  <span className="text-[11px] text-accent-cyan font-mono">Syncs live with PayPal Orders API</span>
                 </label>
                 <select
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
-                  className="w-full mt-1.5 px-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 font-medium text-xs focus:outline-none focus:border-primary"
+                  className="w-full mt-1.5 px-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 font-medium text-xs focus:outline-none focus:border-primary transition"
                 >
                   {CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>
@@ -290,12 +379,12 @@ function CheckoutContent() {
                     min="1.00"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    className="w-full pl-8 pr-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 font-semibold text-sm focus:outline-none focus:border-primary"
+                    className="w-full pl-8 pr-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 font-semibold text-sm focus:outline-none focus:border-primary transition"
                     placeholder="10.00"
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Settlement amount: <strong>{currency} {Number(amount || 0).toFixed(2)}</strong>
+                  Settlement volume: <strong>{currency} {Number(amount || 0).toFixed(2)}</strong>
                 </p>
               </div>
 
@@ -306,18 +395,52 @@ function CheckoutContent() {
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full mt-1.5 px-3.5 py-2 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 text-xs focus:outline-none focus:border-primary"
+                  className="w-full mt-1.5 px-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 text-xs focus:outline-none focus:border-primary transition"
                 />
+              </div>
+
+              {/* Security info callout */}
+              <div className="p-3.5 rounded-xl bg-[#080D1C] border border-surface-border flex items-start gap-2.5 text-slate-400 text-xs">
+                <Lock className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <p className="leading-relaxed text-[11px]">
+                  Transactions are processed using PayPal Sandbox REST API v2 with strict idempotency and cryptographic server verification.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Unified Order Summary & Official PayPal Checkout */}
+          <div className="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5 h-fit shadow-lg">
+            <h3 className="font-bold text-base text-white">Order Summary</h3>
+
+            <div className="space-y-2.5 text-xs text-slate-300 border-b border-surface-border/60 pb-4">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Selected Currency</span>
+                <span className="font-bold text-cyan-300 font-mono">{currency}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Payee Merchant</span>
+                <span className="truncate max-w-[150px] font-mono text-[11px] text-slate-200">
+                  {paypalConfig?.sellerPayee || "Sandbox Seller"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Payment Intent</span>
+                <span className="font-mono text-emerald-400 font-semibold">CAPTURE</span>
               </div>
             </div>
 
-            {/* Official PayPal JS SDK Button Container */}
-            <div className="pt-4 border-t border-surface-border/60 space-y-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Instant PayPal Checkout:
+            <div className="flex items-center justify-between text-base font-extrabold text-white">
+              <span>Total Due:</span>
+              <span className="text-2xl text-accent-cyan font-mono">
+                {currency} {Number(amount || 0).toFixed(2)}
               </span>
-              <div className="max-w-sm mx-auto">
-                {paypalConfig?.clientId && (
+            </div>
+
+            {/* Official PayPal Buttons Container */}
+            <div className="pt-2 space-y-3">
+              {paypalConfig?.clientId && Number(amount) > 0 ? (
+                <div className="w-full">
                   <PayPalButton
                     clientId={paypalConfig.clientId}
                     currency={currency}
@@ -332,51 +455,18 @@ function CheckoutContent() {
                       setStep("ERROR");
                     }}
                   />
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="py-4 text-center text-xs text-slate-500">
+                  Enter an amount greater than 0 to load PayPal Checkout.
+                </div>
+              )}
+
+              <p className="text-[10px] text-slate-500 text-center flex items-center justify-center gap-1.5 font-medium">
+                <Lock className="w-3 h-3 text-slate-400" />
+                <span>Powered by PayPal JavaScript SDK &amp; Orders v2</span>
+              </p>
             </div>
-          </div>
-
-          {/* Summary & REST Fallback Sidebar */}
-          <div className="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5 h-fit">
-            <h3 className="font-bold text-base text-white">Order Summary</h3>
-
-            <div className="space-y-2 text-xs text-slate-300 border-b border-surface-border/60 pb-4">
-              <div className="flex justify-between">
-                <span>Selected Currency</span>
-                <span className="font-bold text-cyan-300">{currency}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Payee Seller</span>
-                <span className="truncate max-w-[140px] font-mono text-[11px]">
-                  {paypalConfig?.sellerPayee || "Sandbox Seller"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Intent</span>
-                <span className="font-mono text-emerald-400">CAPTURE</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-base font-extrabold text-white">
-              <span>Total Amount:</span>
-              <span className="text-xl text-accent-cyan">
-                {currency} {Number(amount).toFixed(2)}
-              </span>
-            </div>
-
-            <button
-              onClick={handleCreateOrderManual}
-              disabled={step === "CREATING" || Number(amount) <= 0}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-secondary to-indigo-600 hover:from-secondary-hover hover:to-indigo-700 text-white font-semibold text-xs shadow-lg shadow-secondary/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              <span>{step === "CREATING" ? "Calling PayPal Orders v2..." : "Create Order via REST API"}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-
-            <p className="text-[11px] text-slate-400 text-center">
-              Calls official `/v2/checkout/orders` with verified currency and amount.
-            </p>
           </div>
         </div>
       </div>
@@ -387,12 +477,13 @@ function CheckoutContent() {
           <div className="flex items-center justify-between pb-4 border-b border-surface-border">
             <div className="space-y-1">
               <span className="text-xs font-bold uppercase text-emerald-400 tracking-wider">
-                Order Successfully Created in PayPal
+                Order Created in PayPal Sandbox
               </span>
               <h3 className="text-xl font-bold text-white">PayPal Order #{orderData.orderId}</h3>
             </div>
-            <span className="text-xs px-3 py-1 rounded-full bg-amber-500/15 text-amber-400 font-semibold border border-amber-500/30">
-              Awaiting Approval / Capture
+            <span className="text-xs px-3 py-1 rounded-full bg-amber-500/15 text-amber-400 font-semibold border border-amber-500/30 flex items-center gap-1.5 font-mono">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              Awaiting Buyer Approval
             </span>
           </div>
 
@@ -422,9 +513,9 @@ function CheckoutContent() {
                 P
               </div>
               <div>
-                <h4 className="font-bold text-sm text-white">Approve &amp; Capture Order</h4>
+                <h4 className="font-bold text-sm text-white">Approve Order in PayPal</h4>
                 <p className="text-xs text-slate-300">
-                  Open the PayPal Sandbox Checkout portal to approve with your Sandbox Buyer account, then capture.
+                  Open the PayPal Sandbox Checkout portal to approve with your Sandbox Buyer account.
                 </p>
               </div>
             </div>
@@ -447,7 +538,7 @@ function CheckoutContent() {
                 className="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Execute Server Capture (`/v2/checkout/orders/{orderData.orderId}/capture`)</span>
+                <span>Execute Server Capture</span>
               </button>
             </div>
           </div>
