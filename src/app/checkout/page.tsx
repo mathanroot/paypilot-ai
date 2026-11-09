@@ -19,6 +19,7 @@ import {
   Lock,
   ChevronRight,
   Check,
+  Copy,
 } from "lucide-react";
 import PayPalButton from "@/components/PayPalButton";
 
@@ -36,11 +37,70 @@ const CURRENCIES: CurrencyOption[] = [
   { code: "AUD", name: "Australian Dollar", symbol: "A$" },
 ];
 
+const TEST_CARDS = {
+  visa: {
+    brand: "Visa",
+    label: "Visa (Verified Instant Pass)",
+    number: "4032000000000000",
+    formatted: "4032 0000 0000 0000",
+    exp: "12/28",
+    csc: "123",
+    zip: "95131",
+    city: "San Jose",
+    state: "CA",
+    address: "123 Main St",
+    name: "John Doe",
+  },
+  mastercard: {
+    brand: "Mastercard",
+    label: "Mastercard (Verified Instant Pass)",
+    number: "5424000000000001",
+    formatted: "5424 0000 0000 0001",
+    exp: "12/28",
+    csc: "123",
+    zip: "95131",
+    city: "San Jose",
+    state: "CA",
+    address: "123 Main St",
+    name: "John Doe",
+  },
+  amex: {
+    brand: "Amex",
+    label: "American Express (Sandbox Direct)",
+    number: "378282246310005",
+    formatted: "3782 822463 10005",
+    exp: "12/28",
+    csc: "1234",
+    zip: "95131",
+    city: "San Jose",
+    state: "CA",
+    address: "123 Main St",
+    name: "John Doe",
+  },
+};
+
 function CheckoutContent() {
   const searchParams = useSearchParams();
   const [currency, setCurrency] = useState<string>("USD");
   const [amount, setAmount] = useState<string>("10.00");
   const [description, setDescription] = useState<string>("PayPilot AI FinTech Verification Payment");
+
+  // Sandbox Test Card Helper State
+  const [selectedCardType, setSelectedCardType] = useState<"visa" | "mastercard" | "amex">("visa");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const handleCopy = (text: string, key: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    }
+  };
+
+  const handleCopyAll = (card: typeof TEST_CARDS["visa"]) => {
+    const allText = `Card: ${card.number} | Exp: ${card.exp} | CSC: ${card.csc} | ZIP: ${card.zip} | Name: ${card.name} | Address: ${card.address}, ${card.city}, ${card.state}`;
+    handleCopy(allText, "all");
+  };
 
   const [step, setStep] = useState<"IDLE" | "CREATING" | "ORDER_CREATED" | "CAPTURING" | "COMPLETED" | "ERROR">("IDLE");
   const [orderData, setOrderData] = useState<any>(null);
@@ -258,7 +318,7 @@ function CheckoutContent() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-surface-border">
         <div>
@@ -336,13 +396,14 @@ function CheckoutContent() {
 
       {/* Step: IDLE - Configure Currency & Amount */}
       <div className={step === "IDLE" || step === "CREATING" ? "block" : "hidden"}>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Configure Parameters (5 cols) */}
+          <div className="lg:col-span-5 p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5">
             <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
               <h3 className="font-bold text-base text-white">Payment Parameters</h3>
               <span className="text-xs text-emerald-400 flex items-center gap-1.5 font-medium">
                 <ShieldCheck className="w-4 h-4" />
-                PayPal Developer Sandbox Verified
+                Sandbox Verified
               </span>
             </div>
 
@@ -351,7 +412,7 @@ function CheckoutContent() {
               <div>
                 <label className="text-slate-300 font-semibold flex items-center justify-between">
                   <span>Payment Currency:</span>
-                  <span className="text-[11px] text-accent-cyan font-mono">Syncs live with PayPal Orders API</span>
+                  <span className="text-[11px] text-accent-cyan font-mono">Syncs live with PayPal</span>
                 </label>
                 <select
                   value={currency}
@@ -366,7 +427,7 @@ function CheckoutContent() {
                 </select>
               </div>
 
-              {/* Amount Input */}
+              {/* Amount Input with Quick Preset Chips */}
               <div>
                 <label className="text-slate-300 font-semibold">Payment Amount ({currency}):</label>
                 <div className="mt-1.5 relative">
@@ -379,11 +440,31 @@ function CheckoutContent() {
                     min="1.00"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    className="w-full pl-8 pr-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 font-semibold text-sm focus:outline-none focus:border-primary transition"
+                    className="w-full pl-8 pr-3.5 py-2.5 rounded-xl bg-[#0A0F1D] border border-surface-border text-slate-100 font-semibold text-sm focus:outline-none focus:border-primary transition font-mono"
                     placeholder="10.00"
                   />
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1">
+
+                {/* Quick Preset Buttons */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-500">Presets:</span>
+                  {["5.00", "10.00", "25.00", "50.00", "100.00"].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAmount(preset)}
+                      className={`text-[10px] px-2 py-0.5 rounded font-mono transition border ${
+                        amount === preset
+                          ? "bg-primary text-white border-primary"
+                          : "bg-[#0A0F1D] text-slate-400 border-surface-border hover:text-white"
+                      }`}
+                    >
+                      ${preset}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="text-[11px] text-slate-500 mt-2">
                   Settlement volume: <strong>{currency} {Number(amount || 0).toFixed(2)}</strong>
                 </p>
               </div>
@@ -409,9 +490,9 @@ function CheckoutContent() {
             </div>
           </div>
 
-          {/* Unified Order Summary & Official PayPal Checkout */}
-          <div className="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5 h-fit shadow-lg">
-            <h3 className="font-bold text-base text-white">Order Summary</h3>
+          {/* Unified Order Summary & Official PayPal Checkout (7 cols) */}
+          <div className="lg:col-span-7 p-6 rounded-2xl bg-surface-card border border-surface-border space-y-5 shadow-lg">
+            <h3 className="font-bold text-base text-white">Order Summary &amp; Payment Gateway</h3>
 
             <div className="space-y-2.5 text-xs text-slate-300 border-b border-surface-border/60 pb-4">
               <div className="flex justify-between">
@@ -420,13 +501,13 @@ function CheckoutContent() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Payee Merchant</span>
-                <span className="truncate max-w-[150px] font-mono text-[11px] text-slate-200">
-                  {paypalConfig?.sellerPayee || "Sandbox Seller"}
+                <span className="truncate max-w-[220px] font-mono text-[11px] text-slate-200">
+                  {paypalConfig?.sellerPayee || "sb-j8yz353762209@business.example.com"}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Payment Intent</span>
-                <span className="font-mono text-emerald-400 font-semibold">CAPTURE</span>
+                <span className="font-mono text-emerald-400 font-semibold">CAPTURE (Orders v2)</span>
               </div>
             </div>
 
@@ -437,8 +518,148 @@ function CheckoutContent() {
               </span>
             </div>
 
+            {/* Sandbox Test Cards (1-Click Fast Fill & Copy) Helper Widget */}
+            <div className="p-4 rounded-xl bg-[#080D1D] border border-cyan-500/30 space-y-3 shadow-inner">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-accent-cyan" />
+                  <span className="font-semibold text-xs text-white">
+                    Sandbox Test Cards (1-Click Quick Copy)
+                  </span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono border border-emerald-500/30">
+                  Ready for Card Entry
+                </span>
+              </div>
+
+              {/* Card Switcher Tabs */}
+              <div className="grid grid-cols-3 gap-2">
+                {(["visa", "mastercard", "amex"] as const).map((key) => {
+                  const card = TEST_CARDS[key];
+                  const isActive = selectedCardType === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setSelectedCardType(key)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition text-center ${
+                        isActive
+                          ? "bg-primary text-white border-primary shadow-sm"
+                          : "bg-[#050811] text-slate-400 border-surface-border hover:text-white"
+                      }`}
+                    >
+                      {card.brand}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Active Card Preview & Fast Copy Actions */}
+              {(() => {
+                const activeCard = TEST_CARDS[selectedCardType];
+                return (
+                  <div className="space-y-2.5">
+                    {/* Visual Card Strip */}
+                    <div className="p-3 rounded-lg bg-gradient-to-r from-slate-900 to-[#0e1629] border border-slate-700/60 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
+                          {activeCard.label}
+                        </div>
+                        <div className="font-mono text-sm font-bold text-white tracking-widest mt-0.5">
+                          {activeCard.formatted}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(activeCard.number, "card-num")}
+                        className="px-3 py-1 rounded-md bg-accent-cyan/15 hover:bg-accent-cyan/25 border border-accent-cyan/30 text-accent-cyan text-xs font-semibold transition flex items-center gap-1.5"
+                        title="Copy card number"
+                      >
+                        {copiedKey === "card-num" ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy Card #</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Quick Copy Chips for Expiry, CSC, ZIP, Name */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(activeCard.exp, "exp")}
+                        className="p-2 rounded-lg bg-[#050811] border border-surface-border hover:border-slate-500 text-left transition flex items-center justify-between group"
+                        title="Click to copy expiration"
+                      >
+                        <span className="text-slate-400">Expires:</span>
+                        <span className="font-mono font-semibold text-cyan-300">
+                          {copiedKey === "exp" ? "Copied!" : activeCard.exp}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(activeCard.csc, "csc")}
+                        className="p-2 rounded-lg bg-[#050811] border border-surface-border hover:border-slate-500 text-left transition flex items-center justify-between group"
+                        title="Click to copy CSC / CVV"
+                      >
+                        <span className="text-slate-400">CSC:</span>
+                        <span className="font-mono font-semibold text-cyan-300">
+                          {copiedKey === "csc" ? "Copied!" : activeCard.csc}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(activeCard.zip, "zip")}
+                        className="p-2 rounded-lg bg-[#050811] border border-surface-border hover:border-slate-500 text-left transition flex items-center justify-between group"
+                        title="Click to copy ZIP code"
+                      >
+                        <span className="text-slate-400">ZIP:</span>
+                        <span className="font-mono font-semibold text-cyan-300">
+                          {copiedKey === "zip" ? "Copied!" : activeCard.zip}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(activeCard.name, "name")}
+                        className="p-2 rounded-lg bg-[#050811] border border-surface-border hover:border-slate-500 text-left transition flex items-center justify-between group"
+                        title="Click to copy Cardholder Name"
+                      >
+                        <span className="text-slate-400">Name:</span>
+                        <span className="font-mono font-semibold text-cyan-300 truncate max-w-[60px]">
+                          {copiedKey === "name" ? "Copied!" : activeCard.name}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                        <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        <span>Click <strong>Copy Card #</strong>, then paste into the Debit/Credit Card box below.</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyAll(activeCard)}
+                        className="text-[11px] text-accent-cyan hover:underline font-mono shrink-0 font-medium"
+                      >
+                        {copiedKey === "all" ? "✓ All Data Copied" : "Copy All Info →"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
             {/* Official PayPal Buttons Container */}
-            <div className="pt-2 space-y-3">
+            <div className="pt-1 space-y-3">
               {paypalConfig?.clientId && Number(amount) > 0 ? (
                 <div className="w-full">
                   <PayPalButton
