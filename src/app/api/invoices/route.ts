@@ -11,11 +11,39 @@ const createInvoiceSchema = z.object({
   itemsSummary: z.string().min(1),
 });
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const merchant = await getCurrentMerchant();
     if (!merchant) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Auto-sync: reconcile any UNPAID invoices that have matching completed payments
+    const pendingInvoices = await prisma.invoice.findMany({
+      where: {
+        merchantId: merchant.id,
+        status: { in: ["UNPAID", "OVERDUE"] },
+      },
+    });
+
+    for (const inv of pendingInvoices) {
+      if (inv.paypalInvoiceId) {
+        const completedPayment = await prisma.payment.findFirst({
+          where: {
+            merchantId: merchant.id,
+            paypalOrderId: inv.paypalInvoiceId,
+            status: { in: ["COMPLETED", "REFUNDED"] },
+          },
+        });
+        if (completedPayment) {
+          await prisma.invoice.update({
+            where: { id: inv.id },
+            data: { status: "PAID" },
+          });
+        }
+      }
     }
 
     const invoices = await prisma.invoice.findMany({

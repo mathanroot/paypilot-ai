@@ -44,10 +44,13 @@ export default function InvoicesPage() {
     itemsSummary: "Consulting & Workflow Automation",
   });
 
-  const fetchInvoices = async () => {
-    setLoading(true);
+  const fetchInvoices = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
-      const res = await fetch("/api/invoices");
+      const res = await fetch(`/api/invoices?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
       const data = await res.json();
       setInvoices(data.invoices || []);
       setCustomers(data.customers || []);
@@ -57,12 +60,39 @@ export default function InvoicesPage() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchInvoices();
+
+    // 1. Auto-refresh when user switches back from PayPal tab or window
+    const handleFocus = () => {
+      fetchInvoices(true);
+    };
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus);
+
+    // 2. Cross-tab storage broadcast listener (when payment completes in another tab)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "paypilot_last_captured_order") {
+        fetchInvoices(true);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    // 3. Background polling every 3 seconds for live settlement updates
+    const interval = setInterval(() => {
+      fetchInvoices(true);
+    }, 3000);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+    };
   }, []);
 
   const handleOpenPayLink = async (invoice: any) => {
@@ -89,6 +119,12 @@ export default function InvoicesPage() {
 
       if (url) {
         window.open(url, "_blank", "noopener,noreferrer");
+
+        // Start rapid poll for 30s while buyer completes payment in the popup
+        const pollInterval = setInterval(() => {
+          fetchInvoices(true);
+        }, 1800);
+        setTimeout(() => clearInterval(pollInterval), 30000);
       }
     } catch (err: any) {
       alert("Failed to connect to PayPal Checkout: " + err.message);

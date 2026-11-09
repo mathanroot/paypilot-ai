@@ -37,13 +37,17 @@ export default function RefundsPage() {
 
   // AI & Job State
   const [analyzing, setAnalyzing] = useState(false);
+  const [staging, setStaging] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState<any | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   // Load Staged Approvals
   const fetchStagedApprovals = async () => {
     try {
-      const res = await fetch("/api/approvals");
+      const res = await fetch(`/api/approvals?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
       const data = await res.json();
       const refundApprovals = (data.approvals || []).filter(
         (a: any) => a.actionType === "EXECUTE_REFUND"
@@ -114,6 +118,33 @@ export default function RefundsPage() {
       .finally(() => setLoading(false));
 
     fetchStagedApprovals();
+
+    // 2. Real-time live polling for staged approval state changes every 3s
+    const interval = setInterval(() => {
+      fetchStagedApprovals();
+    }, 3000);
+
+    // 3. Tab focus listener
+    const handleFocus = () => {
+      fetchStagedApprovals();
+    };
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus);
+
+    // 4. Cross-tab broadcast listener
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "paypilot_approvals_updated") {
+        fetchStagedApprovals();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   // Helper to persist form to sessionStorage
@@ -160,11 +191,10 @@ export default function RefundsPage() {
   const handleSelectPayment = (paymentId: string) => {
     setSelectedPaymentId(paymentId);
     const p = payments.find((x) => x.id === paymentId);
-    const newAmount = p ? String(p.amount) : refundAmount;
-    if (p) {
-      setRefundAmount(newAmount);
-    }
+    const newAmount = p ? String(p.amount) : "";
+    setRefundAmount(newAmount);
     setAiAnalysisResult(null);
+    setSuccessNotice(null);
     sessionStorage.removeItem(STORAGE_KEYS.RESULT);
     saveFormToSession(paymentId, newAmount, reason);
   };
@@ -228,22 +258,44 @@ export default function RefundsPage() {
   };
 
   const handleStageRefund = async () => {
+    if (!selectedPaymentId) return;
+    setStaging(true);
+    setSuccessNotice(null);
     try {
-      const res = await fetch("/api/ai/chat", {
+      const amtNum = parseFloat(refundAmount);
+      if (isNaN(amtNum) || amtNum <= 0) {
+        throw new Error("Please enter a valid positive refund amount.");
+      }
+
+      const res = await fetch("/api/refunds/stage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: `Stage refund for payment ${selectedPaymentId} for amount $${refundAmount} due to ${reason}`,
+          paymentId: selectedPaymentId,
+          amount: amtNum,
+          reason,
         }),
       });
 
       const data = await res.json();
-      setSuccessNotice("Refund staged into Human Approval Center. Awaiting your authorization.");
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to stage refund");
+      }
+
+      setSuccessNotice(
+        `Refund for $${amtNum.toFixed(2)} USD staged into Human Approval Center! (Approval ID: #${data.approvalId ? data.approvalId.slice(0, 8) : "STAGED"})`
+      );
       setAiAnalysisResult(null);
       sessionStorage.removeItem(STORAGE_KEYS.RESULT);
-      fetchStagedApprovals();
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("paypilot_approvals_updated", String(Date.now()));
+      }
+      await fetchStagedApprovals();
     } catch (err: any) {
-      alert(err.message);
+      alert("Refund Staging Error: " + err.message);
+    } finally {
+      setStaging(false);
     }
   };
 
@@ -335,12 +387,24 @@ export default function RefundsPage() {
               </div>
 
               <div>
-                <label className="text-slate-400 font-medium">Refund Amount (USD)</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-400 font-medium">Refund Amount (USD)</label>
+                  {selectedPayment && (
+                    <button
+                      type="button"
+                      onClick={() => handleAmountChange(String(selectedPayment.amount))}
+                      className="text-[11px] text-accent-cyan hover:underline font-mono"
+                    >
+                      Captured Total: ${selectedPayment.amount} USD (Click to fill)
+                    </button>
+                  )}
+                </div>
                 <input
                   type="number"
+                  step="0.01"
                   value={refundAmount}
                   onChange={(e) => handleAmountChange(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white focus:outline-none focus:border-primary transition"
+                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white focus:outline-none focus:border-primary transition font-mono"
                 />
               </div>
 
@@ -391,10 +455,20 @@ export default function RefundsPage() {
                 <div className="pt-1 flex items-center gap-3">
                   <button
                     onClick={handleStageRefund}
-                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md transition-all flex items-center gap-1.5"
+                    disabled={staging}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-semibold text-xs shadow-md transition-all flex items-center gap-1.5"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Stage into Human Approval Center</span>
+                    {staging ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Staging into Human Approval Center...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Stage into Human Approval Center</span>
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={() => {
@@ -468,42 +542,75 @@ export default function RefundsPage() {
             </p>
           ) : (
             <div className="space-y-2">
-              {stagedRefunds.map((app) => (
-                <div
-                  key={app.id}
-                  className="p-3 rounded-xl bg-[#090D1A] border border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-white">{app.title}</span>
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-semibold ${
-                          app.status === "PENDING"
-                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                            : app.status === "APPROVED" || app.status === "EXECUTED"
-                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                            : "bg-slate-800 text-slate-400"
-                        }`}
-                      >
-                        {app.status}
-                      </span>
+              {[...stagedRefunds]
+                .sort((a, b) => {
+                  if (a.status === "PENDING" && b.status !== "PENDING") return -1;
+                  if (a.status !== "PENDING" && b.status === "PENDING") return 1;
+                  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+                })
+                .map((app) => (
+                  <div
+                    key={app.id}
+                    className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition ${
+                      app.status === "PENDING"
+                        ? "bg-amber-500/10 border-amber-500/40 shadow-sm shadow-amber-500/10"
+                        : "bg-[#090D1A] border-surface-border"
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">{app.title}</span>
+                        <span
+                          className={`text-[10px] px-2.5 py-0.5 rounded font-mono font-semibold flex items-center gap-1 ${
+                            app.status === "PENDING"
+                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                              : app.status === "APPROVED" || app.status === "EXECUTED" || app.status === "COMPLETED"
+                              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                              : "bg-slate-800 text-slate-400 border border-slate-700"
+                          }`}
+                        >
+                          {app.status === "PENDING" ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping inline-block" />
+                              <span>PENDING APPROVAL</span>
+                            </>
+                          ) : app.status === "APPROVED" || app.status === "EXECUTED" || app.status === "COMPLETED" ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400 inline" />
+                              <span>COMPLETED</span>
+                            </>
+                          ) : (
+                            app.status
+                          )}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">{app.description}</p>
                     </div>
-                    <p className="text-[11px] text-slate-400">{app.description}</p>
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] font-mono text-slate-500">
-                      {new Date(app.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                    <Link
-                      href="/approvals"
-                      className="px-2.5 py-1 rounded-lg bg-surface border border-surface-border text-slate-300 hover:text-white transition text-[11px]"
-                    >
-                      Review &rarr;
-                    </Link>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-[11px] font-mono text-slate-500">
+                        {new Date(app.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      {app.status === "PENDING" ? (
+                        <Link
+                          href="/approvals"
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold transition text-xs flex items-center gap-1 shadow-md shadow-amber-500/20"
+                        >
+                          <span>Authorize Now</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      ) : (
+                        <Link
+                          href="/approvals"
+                          className="px-2.5 py-1 rounded-lg bg-surface border border-surface-border text-slate-300 hover:text-white transition text-[11px] flex items-center gap-1"
+                        >
+                          <span>View Log</span>
+                          <ArrowUpRight className="w-3 h-3" />
+                        </Link>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>

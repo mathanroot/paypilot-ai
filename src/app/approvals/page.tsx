@@ -64,6 +64,33 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     fetchApprovals();
+
+    // Real-time live polling every 3s
+    const interval = setInterval(() => {
+      fetchApprovals();
+    }, 3000);
+
+    // Tab focus / visibility listener
+    const handleFocus = () => {
+      fetchApprovals();
+    };
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus);
+
+    // Cross-tab broadcast listener
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "paypilot_approvals_updated") {
+        fetchApprovals();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   const togglePreview = (id: string) => {
@@ -92,6 +119,9 @@ export default function ApprovalsPage() {
           ? (data.message || "Operation approved and executed successfully.")
           : "Operation rejected and marked as declined."
       );
+      if (typeof window !== "undefined") {
+        localStorage.setItem("paypilot_approvals_updated", String(Date.now()));
+      }
       fetchApprovals();
     } catch (err: any) {
       setErrorMessage(err.message || "An unexpected error occurred during execution.");
