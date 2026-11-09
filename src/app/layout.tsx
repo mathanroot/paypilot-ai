@@ -5,6 +5,14 @@ export const metadata: Metadata = {
   title: "PayPilot AI — Your Money. Your AI. Your Control.",
   description:
     "Intelligent FinTech & Agentic Payments Operations Platform powered by PayPal Developer Platform and Autonomous AI Agents.",
+  icons: {
+    icon: [
+      { url: "/icon.png", type: "image/png" },
+      { url: "/favicon.ico" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-icon.png",
+  },
 };
 
 export default function RootLayout({
@@ -15,6 +23,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
+        <link rel="icon" href="/icon.png" type="image/png" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/apple-icon.png" />
         <link rel="preconnect" href="https://www.sandbox.paypal.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://www.paypalobjects.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://api-m.sandbox.paypal.com" crossOrigin="anonymous" />

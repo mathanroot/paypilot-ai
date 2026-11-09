@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Sparkles,
   Bot,
@@ -23,8 +24,15 @@ export default function LandingPage() {
       <header className="border-b border-surface-border/60 bg-[#070A12]/80 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-accent-cyan flex items-center justify-center shadow-lg shadow-primary/20">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="relative w-11 h-11 rounded-xl overflow-hidden bg-[#0A0F1D] border border-cyan-500/40 shadow-lg shadow-cyan-500/25 flex items-center justify-center p-0.5">
+              <Image
+                src="/logo.png"
+                alt="PayPilot AI Logo"
+                width={44}
+                height={44}
+                className="w-full h-full object-cover rounded-lg"
+                priority
+              />
             </div>
             <div>
               <span className="text-xl font-bold tracking-tight text-white">

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -78,9 +79,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <aside className="hidden lg:flex w-72 flex-col fixed inset-y-0 z-50 bg-[#0A0F1D] border-r border-surface-border">
         {/* Brand Header */}
         <div className="flex items-center justify-between px-6 h-20 border-b border-surface-border">
-          <Link href="/dashboard" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-accent-cyan flex items-center justify-center shadow-lg shadow-primary/20">
-              <Sparkles className="w-5 h-5 text-white" />
+          <Link href="/dashboard" className="flex items-center gap-3 group">
+            <div className="relative w-11 h-11 rounded-xl overflow-hidden bg-[#0A0F1D] border border-cyan-500/40 shadow-lg shadow-cyan-500/25 flex items-center justify-center p-0.5 transition-transform duration-300 group-hover:scale-105">
+              <Image
+                src="/logo.png"
+                alt="PayPilot AI Logo"
+                width={44}
+                height={44}
+                className="w-full h-full object-cover rounded-lg"
+                priority
+              />
             </div>
             <div>
               <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-100 to-indigo-200 bg-clip-text text-transparent">
@@ -175,6 +183,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
+            <div className="lg:hidden flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg overflow-hidden bg-[#0A0F1D] border border-cyan-500/40 shadow-sm p-0.5">
+                <Image
+                  src="/logo.png"
+                  alt="PayPilot AI"
+                  width={32}
+                  height={32}
+                  className="w-full h-full object-cover rounded-md"
+                />
+              </div>
+              <span className="text-base font-bold text-white">PayPilot <span className="text-accent-cyan text-xs">AI</span></span>
+            </div>
             <div className="hidden sm:flex items-center gap-2">
               <span className="text-xs text-slate-400">Environment:</span>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -215,7 +235,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {mobileMenuOpen && (
           <div className="lg:hidden fixed inset-0 z-50 bg-background/95 backdrop-blur-lg flex flex-col p-6">
             <div className="flex items-center justify-between pb-6 border-b border-surface-border">
-              <span className="text-lg font-bold">PayPilot AI</span>
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl overflow-hidden bg-[#0A0F1D] border border-cyan-500/40 shadow-sm p-0.5">
+                  <Image
+                    src="/logo.png"
+                    alt="PayPilot AI"
+                    width={36}
+                    height={36}
+                    className="w-full h-full object-cover rounded-lg"
+                  />
+                </div>
+                <div>
+                  <span className="text-lg font-bold text-white">PayPilot <span className="text-accent-cyan text-xs">AI</span></span>
+                  <p className="text-[9px] text-slate-400 uppercase font-semibold">Autonomous FinTech</p>
+                </div>
+              </div>
               <button onClick={() => setMobileMenuOpen(false)}>
                 <X className="w-6 h-6" />
               </button>

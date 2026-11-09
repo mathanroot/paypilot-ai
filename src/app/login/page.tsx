@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Sparkles, ArrowRight, Lock, Mail, ShieldCheck, CheckCircle2 } from "lucide-react";
 
 export default function LoginPage() {
@@ -49,9 +50,16 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8 relative z-10">
         {/* Brand Header */}
         <div className="text-center space-y-2">
-          <Link href="/" className="inline-flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-primary to-accent-cyan flex items-center justify-center shadow-lg shadow-primary/25">
-              <Sparkles className="w-6 h-6 text-white" />
+          <Link href="/" className="inline-flex items-center gap-3 group">
+            <div className="relative w-14 h-14 rounded-2xl overflow-hidden bg-[#0A0F1D] border border-cyan-500/40 shadow-xl shadow-cyan-500/25 flex items-center justify-center p-0.5 transition-transform duration-300 group-hover:scale-105">
+              <Image
+                src="/logo.png"
+                alt="PayPilot AI Logo"
+                width={56}
+                height={56}
+                className="w-full h-full object-cover rounded-xl"
+                priority
+              />
             </div>
           </Link>
           <h1 className="text-2xl font-bold tracking-tight text-white">Sign In to PayPilot AI</h1>
