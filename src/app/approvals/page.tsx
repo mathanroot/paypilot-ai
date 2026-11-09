@@ -36,16 +36,25 @@ export default function ApprovalsPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedPreview, setExpandedPreview] = useState<Record<string, boolean>>({});
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
 
-  const fetchApprovals = async () => {
+  const fetchApprovals = async (isManualClick = false) => {
     setLoading(true);
     try {
-      const res = await fetch("/api/approvals");
+      const res = await fetch(`/api/approvals?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
       const data = await res.json();
       setApprovals(data.approvals || []);
       setUniquePendingApprovals(data.uniquePendingApprovals || []);
       setUniquePendingCount(data.uniquePendingCount || 0);
       setDuplicatePendingCount(data.duplicatePendingCount || 0);
+
+      if (isManualClick) {
+        setRefreshSuccess(true);
+        setTimeout(() => setRefreshSuccess(false), 2000);
+      }
     } catch (e: any) {
       console.error("Failed to load approvals", e);
     } finally {
@@ -119,12 +128,16 @@ export default function ApprovalsPage() {
           </div>
 
           <button
-            onClick={fetchApprovals}
+            onClick={() => fetchApprovals(true)}
             disabled={loading}
-            className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-surface-card hover:bg-surface-border border border-surface-border text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition-all"
+            className={`self-start sm:self-auto px-3.5 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 transition-all ${
+              refreshSuccess
+                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-medium"
+                : "bg-surface-card hover:bg-surface-border border-surface-border text-slate-300 hover:text-white"
+            }`}
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-cyan-400" : ""}`} />
+            <span>{refreshSuccess ? "Refreshed!" : "Refresh"}</span>
           </button>
         </div>
 
