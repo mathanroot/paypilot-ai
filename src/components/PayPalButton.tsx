@@ -61,9 +61,8 @@ export default function PayPalButton({
       clientId,
       currency: currency.toUpperCase(),
       intent: "capture",
-      components: "buttons,card-fields",
+      components: "buttons",
       enableFunding: "card",
-      commit: true,
     })
       .then((paypal) => {
         if (!isMounted || !paypal || !paypal.Buttons) return;
