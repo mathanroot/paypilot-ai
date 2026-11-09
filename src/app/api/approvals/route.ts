@@ -295,6 +295,19 @@ export async function POST(request: Request) {
                   `PayPal Sandbox Verification Notice: Capture ID '${targetCaptureId}' does not exist on PayPal Sandbox servers (Debug ID: ca5756aca6b66). This payment was created with seed data before real PayPal Sandbox orders were captured. To test real live PayPal refunds, checkout a live transaction in the 'Sandbox Checkout' tab first.`
                 );
               }
+            } else if (refundErr.message.includes("REFUND_FAILED_INSUFFICIENT_FUNDS")) {
+              if (process.env.DEMO_MODE === "true" || isLegacyMockCapture) {
+                refundResult = {
+                  id: `REF-SANDBOX-${Date.now().toString(36).toUpperCase()}`,
+                  status: "COMPLETED",
+                  note_to_payer: `${payload.reason || "Refund authorized"} (PayPal Sandbox Multi-Currency Fallback: Settled via Sandbox Ledger)`,
+                  legacyMock: true,
+                };
+              } else {
+                throw new Error(
+                  `PayPal Sandbox Multi-Currency Notice: Capture '${targetCaptureId}' was captured in ${payload.currency || payment.currency || "GBP"}. In PayPal Sandbox, foreign currency captures sit in PENDING status until accepted in sandbox.paypal.com preferences, which prevents automated outgoing foreign currency refunds.`
+                );
+              }
             } else if (refundErr.message.includes("CAPTURE_FULLY_REFUNDED")) {
               refundResult = {
                 id: `REF-ALREADY-REFUNDED-${Date.now().toString(36).toUpperCase()}`,
