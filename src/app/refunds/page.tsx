@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   RotateCcw,
   ShieldCheck,
@@ -25,7 +26,10 @@ const STORAGE_KEYS = {
   ACTIVE_JOB: "paypilot_refund_active_job",
 };
 
-export default function RefundsPage() {
+function RefundsContent() {
+  const searchParams = useSearchParams();
+  const targetPaymentId = searchParams.get("paymentId");
+
   const [payments, setPayments] = useState<any[]>([]);
   const [stagedRefunds, setStagedRefunds] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,10 +62,77 @@ export default function RefundsPage() {
     }
   };
 
+  // Helper to persist form to sessionStorage
+  const saveFormToSession = (pId: string, amt: string, r: string) => {
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem(
+          STORAGE_KEYS.FORM,
+          JSON.stringify({ selectedPaymentId: pId, refundAmount: amt, reason: r })
+        );
+      } catch {}
+    }
+  };
+
+  // Fetch Completed Payments with immediate URL and cache-busting sync
+  const fetchCompletedPayments = async (explicitTargetId?: string) => {
+    try {
+      const res = await fetch(`/api/transactions?status=COMPLETED&t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      const data = await res.json();
+      const txs = data.transactions || [];
+      setPayments(txs);
+
+      if (txs.length > 0) {
+        const queryId = explicitTargetId || targetPaymentId;
+        const matchingUrlTarget = queryId
+          ? txs.find((t: any) => t.id === queryId || t.paypalOrderId === queryId)
+          : null;
+
+        if (matchingUrlTarget) {
+          setSelectedPaymentId(matchingUrlTarget.id);
+          setRefundAmount(String(matchingUrlTarget.amount));
+          saveFormToSession(matchingUrlTarget.id, String(matchingUrlTarget.amount), reason);
+        } else {
+          // If no URL target, check if current selection or saved form ID is in txs
+          const savedForm = typeof window !== "undefined" ? sessionStorage.getItem(STORAGE_KEYS.FORM) : null;
+          const savedId = savedForm ? JSON.parse(savedForm).selectedPaymentId : null;
+          const candidateId = selectedPaymentId || savedId;
+          const matchingPayment = txs.find((t: any) => t.id === candidateId);
+
+          if (matchingPayment) {
+            setSelectedPaymentId(matchingPayment.id);
+            if (!refundAmount) {
+              setRefundAmount(String(matchingPayment.amount));
+            }
+          } else {
+            // Fallback to first available completed payment
+            setSelectedPaymentId(txs[0].id);
+            setRefundAmount(String(txs[0].amount));
+            saveFormToSession(txs[0].id, String(txs[0].amount), reason);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load completed payments", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle URL paymentId changes immediately
+  useEffect(() => {
+    if (targetPaymentId) {
+      fetchCompletedPayments(targetPaymentId);
+    }
+  }, [targetPaymentId]);
+
   // 1. Initial Load: Fetch Completed Payments and Restore Saved Session State
   useEffect(() => {
-    // Restore cached form & result from sessionStorage immediately
-    if (typeof window !== "undefined") {
+    // Restore cached form & result from sessionStorage immediately if not directed via URL paymentId
+    if (typeof window !== "undefined" && !targetPaymentId) {
       try {
         const savedForm = sessionStorage.getItem(STORAGE_KEYS.FORM);
         if (savedForm) {
@@ -93,30 +164,7 @@ export default function RefundsPage() {
       }
     }
 
-    // Fetch transactions
-    fetch("/api/transactions?status=COMPLETED")
-      .then((res) => res.json())
-      .then((data) => {
-        const txs = data.transactions || [];
-        setPayments(txs);
-
-        // If no payment was restored from session, pick the first one
-        if (txs.length > 0) {
-          const savedForm = sessionStorage.getItem(STORAGE_KEYS.FORM);
-          const savedId = savedForm ? JSON.parse(savedForm).selectedPaymentId : null;
-          const matchingPayment = txs.find((t: any) => t.id === savedId);
-
-          if (matchingPayment) {
-            setSelectedPaymentId(matchingPayment.id);
-          } else if (!savedId) {
-            setSelectedPaymentId(txs[0].id);
-            setRefundAmount(String(txs[0].amount));
-            saveFormToSession(txs[0].id, String(txs[0].amount), reason);
-          }
-        }
-      })
-      .finally(() => setLoading(false));
-
+    fetchCompletedPayments();
     fetchStagedApprovals();
 
     // 2. Real-time live polling for staged approval state changes every 3s
@@ -124,16 +172,21 @@ export default function RefundsPage() {
       fetchStagedApprovals();
     }, 3000);
 
-    // 3. Tab focus listener
+    // 3. Tab focus & visibility change listener - immediately recheck completed payments & approvals
     const handleFocus = () => {
+      fetchCompletedPayments();
       fetchStagedApprovals();
     };
     window.addEventListener("focus", handleFocus);
     window.addEventListener("visibilitychange", handleFocus);
 
-    // 4. Cross-tab broadcast listener
+    // 4. Cross-tab broadcast listener for checkout captures and approval changes
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "paypilot_approvals_updated") {
+      if (
+        e.key === "paypilot_approvals_updated" ||
+        e.key === "paypilot_last_captured_order"
+      ) {
+        fetchCompletedPayments();
         fetchStagedApprovals();
       }
     };
@@ -146,17 +199,6 @@ export default function RefundsPage() {
       window.removeEventListener("storage", handleStorage);
     };
   }, []);
-
-  // Helper to persist form to sessionStorage
-  const saveFormToSession = (pId: string, amt: string, r: string) => {
-    if (typeof window === "undefined") return;
-    try {
-      sessionStorage.setItem(
-        STORAGE_KEYS.FORM,
-        JSON.stringify({ selectedPaymentId: pId, refundAmount: amt, reason: r })
-      );
-    } catch {}
-  };
 
   // Helper to resume active job if user switched tabs
   const resumeActiveJob = async (job: any) => {
@@ -616,5 +658,22 @@ export default function RefundsPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function RefundsPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <div className="max-w-5xl mx-auto p-12 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+            <span>Loading AI Refund Assistant...</span>
+          </div>
+        </DashboardLayout>
+      }
+    >
+      <RefundsContent />
+    </Suspense>
   );
 }

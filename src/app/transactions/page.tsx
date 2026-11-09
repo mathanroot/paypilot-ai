@@ -73,8 +73,12 @@ export default function TransactionsPage() {
       const url = new URL("/api/transactions", window.location.origin);
       if (statusFilter !== "ALL") url.searchParams.set("status", statusFilter);
       if (search) url.searchParams.set("search", search);
+      url.searchParams.set("t", String(Date.now()));
 
-      const res = await fetch(url.toString());
+      const res = await fetch(url.toString(), {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
       const data = await res.json();
       setTransactions(data.transactions || []);
     } catch (e) {
@@ -86,6 +90,25 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     fetchTransactions();
+
+    const handleFocus = () => {
+      fetchTransactions();
+    };
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "paypilot_last_captured_order" || e.key === "paypilot_approvals_updated") {
+        fetchTransactions();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, [statusFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
