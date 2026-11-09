@@ -5,7 +5,7 @@
   "description": "PayPilot AI — Intelligent FinTech & Agentic Payments Platform for PayPal Hackathon",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && prisma db push && node prisma/seed.js && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
