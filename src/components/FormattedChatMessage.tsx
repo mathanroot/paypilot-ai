@@ -80,6 +80,7 @@ export default function FormattedChatMessage({ content, allowExport = false }: F
     const entries: Array<{ key: string; value: string }> = [];
 
     let detectedAmount: string | null = null;
+    let detectedLabel: string = "Transaction Volume";
     let detectedStatus: string | null = null;
     let detectedOrderId: string | null = null;
     let detectedCaptureId: string | null = null;
@@ -89,18 +90,50 @@ export default function FormattedChatMessage({ content, allowExport = false }: F
       if (parts.length >= 2) {
         const key = parts[0].replace(/\*\*/g, "").replace(/`/g, "").trim();
         const value = parts[1].trim();
+        const lowerKey = key.toLowerCase();
 
-        if (key.toLowerCase().includes("amount") && !detectedAmount) {
-          detectedAmount = value.replace(/\*\*/g, "");
-        } else if (key.toLowerCase().includes("status") && !detectedStatus) {
+        // Priority 1: Check for Gross Volume / Captured Volume / Revenue / Amount / Total
+        if (
+          (lowerKey.includes("gross") || lowerKey.includes("volume") || lowerKey.includes("revenue")) &&
+          !detectedAmount &&
+          (value.includes("$") || value.match(/\b\d+(\.\d{2})?\b/))
+        ) {
+          detectedAmount = value.replace(/\*\*/g, "").replace(/`/g, "").trim();
+          detectedLabel = key.replace(/\*\*/g, "").replace(/`/g, "").trim();
+        } else if (
+          (lowerKey.includes("amount") || lowerKey.includes("total")) &&
+          !detectedAmount &&
+          (value.includes("$") || value.match(/\b\d+(\.\d{2})?\b/))
+        ) {
+          detectedAmount = value.replace(/\*\*/g, "").replace(/`/g, "").trim();
+          detectedLabel = key.replace(/\*\*/g, "").replace(/`/g, "").trim();
+        } else if (lowerKey.includes("status") && !detectedStatus) {
           detectedStatus = value.replace(/✅/g, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
-        } else if (key.toLowerCase().includes("order id") && !detectedOrderId) {
+        } else if (lowerKey.includes("order id") && !detectedOrderId) {
           detectedOrderId = value.replace(/`/g, "").trim();
-        } else if (key.toLowerCase().includes("capture id") && !detectedCaptureId) {
+        } else if (lowerKey.includes("capture id") && !detectedCaptureId) {
           detectedCaptureId = value.replace(/`/g, "").trim();
         }
 
         entries.push({ key, value });
+      }
+    }
+
+    // Fallback: If detectedAmount still not found, search all entries for the first money value ($)
+    if (!detectedAmount) {
+      for (const entry of entries) {
+        const cleanedVal = entry.value.replace(/\*\*/g, "").replace(/`/g, "").trim();
+        if (
+          cleanedVal.startsWith("$") ||
+          cleanedVal.includes("$") ||
+          cleanedVal.includes("USD") ||
+          cleanedVal.includes("GBP") ||
+          cleanedVal.includes("EUR")
+        ) {
+          detectedAmount = cleanedVal;
+          detectedLabel = entry.key.replace(/\*\*/g, "").replace(/`/g, "").trim();
+          break;
+        }
       }
     }
 
@@ -116,23 +149,27 @@ export default function FormattedChatMessage({ content, allowExport = false }: F
         {/* Lead Designer FinTech Card Container */}
         <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-[#0B1226]/90 via-[#0A0E1F]/90 to-[#070A14]/90 p-5 space-y-4 shadow-xl backdrop-blur-md">
           {/* Top Hero Bar: Amount + Status */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-surface-border/60">
-            <div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                Transaction Volume
-              </span>
-              <div className="text-2xl font-black text-white tracking-tight flex items-baseline gap-1">
-                <span className="text-accent-cyan">{detectedAmount || "$10.00 USD"}</span>
-              </div>
-            </div>
+          {(detectedAmount || detectedStatus) && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-surface-border/60">
+              {detectedAmount && (
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                    {detectedLabel || "Volume / Amount"}
+                  </span>
+                  <div className="text-2xl font-black text-white tracking-tight flex items-baseline gap-1 font-mono">
+                    <span className="text-accent-cyan">{detectedAmount}</span>
+                  </div>
+                </div>
+              )}
 
-            {detectedStatus && (
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold font-mono">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>{detectedStatus}</span>
-              </div>
-            )}
-          </div>
+              {detectedStatus && (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{detectedStatus}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Quick Copy Chips for IDs */}
           {(detectedOrderId || detectedCaptureId) && (
@@ -186,13 +223,14 @@ export default function FormattedChatMessage({ content, allowExport = false }: F
           {/* Detailed Key-Value Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
             {entries
-              .filter(
-                (e) =>
-                  !e.key.toLowerCase().includes("order id") &&
-                  !e.key.toLowerCase().includes("capture id") &&
-                  !e.key.toLowerCase().includes("amount") &&
-                  !e.key.toLowerCase().includes("status")
-              )
+              .filter((e) => {
+                const lk = e.key.toLowerCase();
+                if (lk.includes("order id") || lk.includes("capture id") || lk.includes("status")) return false;
+                // If this exact metric is featured as the hero metric, avoid redundant duplicate card
+                if (detectedAmount && detectedLabel && lk === detectedLabel.toLowerCase()) return false;
+                if (detectedAmount && lk.includes("amount") && detectedLabel.toLowerCase().includes("amount")) return false;
+                return true;
+              })
               .map((entry, idx) => (
                 <div
                   key={idx}
