@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   X,
   RefreshCw,
+  Info,
   FileSpreadsheet,
   Table,
 } from "lucide-react";
@@ -134,7 +135,7 @@ export default function TransactionsPage() {
         if (data.status === "COMPLETED" || data.captureId) {
           setSyncFeedback(`Order ${orderId} verified and captured (${data.captureId})!`);
         } else {
-          setSyncFeedback(`Order ${orderId} live PayPal status: ${data.status}`);
+          setSyncFeedback(`Order ${orderId} live PayPal status: ${data.status} (Buyer has not completed approval in PayPal Sandbox yet).`);
         }
       } else {
         setSyncFeedback(`Sync complete: ${data.updatedCount || 0} transaction(s) captured.`);
@@ -143,9 +144,10 @@ export default function TransactionsPage() {
       await fetchTransactions();
 
       if (selectedTx && orderId && selectedTx.paypalOrderId === orderId) {
+        const isCompleted = data.status === "COMPLETED" || Boolean(data.captureId);
         setSelectedTx((prev: any) => ({
           ...prev,
-          status: "COMPLETED",
+          status: isCompleted ? "COMPLETED" : (data.status || prev.status),
           paypalCaptureId: data.captureId || prev.paypalCaptureId,
         }));
       }
@@ -385,9 +387,27 @@ export default function TransactionsPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Status:</span>
-                    <span className="text-emerald-400 font-semibold">{selectedTx.status}</span>
+                    <span
+                      className={`font-semibold ${
+                        selectedTx.status === "COMPLETED"
+                          ? "text-emerald-400"
+                          : selectedTx.status === "CREATED"
+                          ? "text-amber-400"
+                          : "text-purple-400"
+                      }`}
+                    >
+                      {selectedTx.status}
+                    </span>
                   </div>
                 </div>
+
+                {/* Feedback within Modal */}
+                {syncFeedback && (
+                  <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 flex items-center gap-2">
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span>{syncFeedback}</span>
+                  </div>
+                )}
 
                 {/* Lifecycle events */}
                 <div className="space-y-1.5">
@@ -425,13 +445,18 @@ export default function TransactionsPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {selectedTx.status === "COMPLETED" && (
+                  {selectedTx.status === "COMPLETED" && selectedTx.paypalCaptureId && (
                     <Link
                       href={`/refunds?paymentId=${selectedTx.id}`}
                       className="px-3.5 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 text-xs font-semibold transition-colors"
                     >
                       Initiate Refund Request
                     </Link>
+                  )}
+                  {selectedTx.status === "CREATED" && (
+                    <span className="text-[11px] text-amber-400/80 font-mono hidden sm:inline">
+                      (Awaiting buyer checkout)
+                    </span>
                   )}
                   <button
                     onClick={() => setSelectedTx(null)}

@@ -44,6 +44,7 @@ function RefundsContent() {
   const [staging, setStaging] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState<any | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [ineligibleNotice, setIneligibleNotice] = useState<string | null>(null);
 
   // Load Staged Approvals
   const fetchStagedApprovals = async () => {
@@ -95,7 +96,24 @@ function RefundsContent() {
           setSelectedPaymentId(matchingUrlTarget.id);
           setRefundAmount(String(matchingUrlTarget.amount));
           saveFormToSession(matchingUrlTarget.id, String(matchingUrlTarget.amount), reason);
+          setIneligibleNotice(null);
         } else {
+          // If queryId was specified but not found in COMPLETED txs, check if it exists in another state (e.g. CREATED)
+          if (queryId) {
+            fetch(`/api/transactions?t=${Date.now()}`, { cache: "no-store" })
+              .then((r) => r.json())
+              .then((d) => {
+                const allTxs: any[] = d.transactions || [];
+                const found = allTxs.find((t: any) => t.id === queryId || t.paypalOrderId === queryId);
+                if (found && found.status !== "COMPLETED") {
+                  setIneligibleNotice(
+                    `Order #${found.paypalOrderId} is in "${found.status}" status (Capture ID: Pending) and cannot be refunded. Only COMPLETED payments with settled PayPal captures can be refunded. Displaying your eligible completed transactions below.`
+                  );
+                }
+              })
+              .catch(() => {});
+          }
+
           // If no URL target, check if current selection or saved form ID is in txs
           const savedForm = typeof window !== "undefined" ? sessionStorage.getItem(STORAGE_KEYS.FORM) : null;
           const savedId = savedForm ? JSON.parse(savedForm).selectedPaymentId : null;
@@ -397,6 +415,22 @@ function RefundsContent() {
               <span>Open Approval Center</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
+          </div>
+        )}
+
+        {/* Ineligible Order Notice Banner */}
+        {ineligibleNotice && (
+          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>{ineligibleNotice}</span>
+            </div>
+            <button
+              onClick={() => setIneligibleNotice(null)}
+              className="text-slate-400 hover:text-white text-xs underline shrink-0 ml-2"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
