@@ -5,7 +5,8 @@
   "description": "PayPilot AI — Intelligent FinTech & Agentic Payments Platform for PayPal Hackathon",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && prisma db push && node prisma/seed.js && next build",
+    "postinstall": "prisma generate",
+    "build": "npx prisma generate && npx prisma db push && node prisma/seed.js && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
@@ -23,6 +24,7 @@
     "lucide-react": "^0.454.0",
     "next": "14.2.15",
     "openai": "^4.68.4",
+    "prisma": "^5.21.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.13.0",
@@ -37,7 +39,6 @@
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
-    "prisma": "^5.21.1",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
     "vitest": "^2.1.3"
