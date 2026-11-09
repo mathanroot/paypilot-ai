@@ -16,7 +16,10 @@ import {
   ShieldCheck,
   X,
   RefreshCw,
+  FileSpreadsheet,
+  Table,
 } from "lucide-react";
+import { exportToExcel, exportToCsv } from "@/lib/exportUtils";
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -27,6 +30,42 @@ export default function TransactionsPage() {
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [exportedType, setExportedType] = useState<string | null>(null);
+
+  const handleExportLedger = (type: "excel" | "csv") => {
+    const tableData = transactions.map((t) => ({
+      "PayPal Order ID": t.paypalOrderId,
+      "Capture ID": t.captureId || "Pending",
+      Customer: t.customer?.name || "Apex Guest Client",
+      Email: t.customer?.email || "sandbox-buyer@example.com",
+      "Amount ($)": Number(t.amount).toFixed(2),
+      Currency: t.currency || "USD",
+      Status: t.status,
+      "Created At": new Date(t.createdAt).toLocaleString(),
+    }));
+
+    const exportPayload = {
+      title: "PayPal Sandbox Transaction Ledger Export",
+      subtitle: `Total Transactions: ${transactions.length} | Status Filter: ${statusFilter}`,
+      metrics: [
+        { label: "Total Transactions", value: transactions.length.toString() },
+        {
+          label: "Settled Volume",
+          value: `$${transactions
+            .filter((t) => t.status === "COMPLETED")
+            .reduce((sum, t) => sum + (t.amount || 0), 0)
+            .toFixed(2)} USD`,
+        },
+      ],
+      tableData,
+    };
+
+    if (type === "excel") exportToExcel(exportPayload, "PayPilot_PayPal_Transactions_Ledger");
+    else exportToCsv(exportPayload, "PayPilot_PayPal_Transactions_Ledger");
+
+    setExportedType(type);
+    setTimeout(() => setExportedType(null), 3000);
+  };
 
   const fetchTransactions = async () => {
     setLoading(true);
@@ -111,7 +150,23 @@ export default function TransactionsPage() {
               PayPal Order &amp; Capture IDs, settlement verification, and lifecycle auditing.
             </p>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={() => handleExportLedger("excel")}
+              className="px-3 py-2 rounded-lg bg-surface border border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm"
+              title="Download transactions as Excel workbook (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{exportedType === "excel" ? "Downloaded .XLSX!" : "Export Excel (.xlsx)"}</span>
+            </button>
+            <button
+              onClick={() => handleExportLedger("csv")}
+              className="px-3 py-2 rounded-lg bg-surface border border-cyan-500/30 hover:bg-cyan-500/10 text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm"
+              title="Download transactions as CSV"
+            >
+              <Table className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{exportedType === "csv" ? "Downloaded CSV!" : "Export CSV"}</span>
+            </button>
             <button
               onClick={() => handleSyncOrder()}
               disabled={syncingAll}

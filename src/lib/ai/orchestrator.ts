@@ -46,7 +46,8 @@ Your core mission:
 4. Provide structured, executive-grade analysis with clear takeaways.
 5. Emphasize PayPal capabilities (Orders v2, Checkout, Captures, Webhooks, Invoicing).
 6. When the merchant asks to create an invoice (e.g. "create new invoice for $50 for Acme"), you MUST invoke the \`create_invoice\` tool so it is officially registered in Smart Collections with an invoice number (INV-2026-xxx) and PayPal payment link. Do NOT call \`create_paypal_order\` for invoice requests.
-7. When asked about revenue, captured volume, or financial performance for a specific period (e.g. 'today', 'last 7 days', 'last 30 days', 'last 90 days'), pass the exact \`timeRange\` parameter ('today', '7d', '30d', '90d') to the \`get_revenue_summary\` tool so the figures match the merchant's Financial Command Center.`;
+7. When asked about revenue, captured volume, or financial performance for a specific period (e.g. 'today', 'last 7 days', 'last 30 days', 'last 90 days'), pass the exact \`timeRange\` parameter ('today', '7d', '30d', '90d') to the \`get_revenue_summary\` tool so the figures match the merchant's Financial Command Center.
+8. When the merchant asks to generate, export, or make a PDF report, Excel (.xlsx) sheet, or CSV (e.g., "make a pdf today Gross Captured Volume", "can make the report to xlsl sheet pdf", "export to excel", "generate financial report"), invoke the appropriate backend tool (\`get_revenue_summary\` or \`generate_financial_report\`). Present the structured metrics, executive takeaways, and recommendations clearly. Inform the merchant that official binary documents (.pdf, .xlsx, .csv) are ready for immediate download using the 1-Click Export buttons directly below your response. NEVER tell the merchant to copy-paste into Word or print the browser window.`;
 
 export async function runAIAgent(params: RunAgentParams): Promise<AgentExecutionResult> {
   const startTime = Date.now();
@@ -258,7 +259,15 @@ async function executeLocalSemanticRouter(
     lower.includes("how much") ||
     lower.includes("gross") ||
     lower.includes("captured") ||
-    lower.includes("volume")
+    lower.includes("volume") ||
+    lower.includes("pdf") ||
+    lower.includes("excel") ||
+    lower.includes("xlsl") ||
+    lower.includes("xlsx") ||
+    lower.includes("sheet") ||
+    lower.includes("csv") ||
+    lower.includes("export") ||
+    lower.includes("download")
   ) {
     const timeRange = lower.includes("today")
       ? "today"
@@ -286,7 +295,7 @@ async function executeLocalSemanticRouter(
         ? "All-Time"
         : "Last 30 Days";
 
-    return `### 📊 Financial Performance Overview (${periodLabel})\n\n- **Gross Captured Volume:** $${Number(res.grossCapturedVolume || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Total Refunds:** $${Number(res.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Net Settled Revenue:** $${Number(res.netRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Settlement Success Rate:** ${res.settlementRate}\n- **Outstanding Receivables:** $${Number(res.outstandingReceivables || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${res.overdueInvoiceCount} overdue invoices.\n\nYour cash flow metrics match live verified records in your Financial Command Center.`;
+    return `### 📄 PayPilot AI Executive Financial Report (${periodLabel})\n\nOfficial verified figures pulled directly from PayPal Sandbox Orders & REST Captures:\n\n- **Gross Captured Volume:** $${Number(res.grossCapturedVolume || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Total Refunds:** $${Number(res.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Net Settled Revenue:** $${Number(res.netRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n- **Settlement Success Rate:** ${res.settlementRate}\n- **Outstanding Receivables:** $${Number(res.outstandingReceivables || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${res.overdueInvoiceCount} overdue invoices.\n\n**Takeaway:** All figures match live verified records in your Financial Command Center. You can download the complete report as an official **PDF**, **Excel (.xlsx)** spreadsheet, or **CSV** file using the 1-Click Export buttons below.`;
   }
 
   if (

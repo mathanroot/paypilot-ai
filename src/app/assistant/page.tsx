@@ -55,6 +55,10 @@ interface SamplePrompt {
 
 const SAMPLE_PROMPTS: SamplePrompt[] = [
   {
+    label: "📑 Export Today's Revenue (PDF/Excel)",
+    prompt: "Make a pdf today Gross Captured Volume and settlement report",
+  },
+  {
     label: "📄 Create $50 Invoice for Acme",
     prompt: "Create a new invoice for $50 for Acme",
     isInvoice: true,
