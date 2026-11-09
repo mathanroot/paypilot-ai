@@ -14,7 +14,16 @@ import {
   ExternalLink,
   ChevronRight,
   Terminal,
+  RotateCcw,
+  MessageSquare,
+  Plus,
+  Trash2,
+  Menu,
+  X,
+  History,
+  Search,
 } from "lucide-react";
+import FormattedChatMessage from "@/components/FormattedChatMessage";
 
 interface Message {
   id: string;
@@ -29,35 +38,170 @@ interface Message {
   timestamp: string;
 }
 
-const SAMPLE_PROMPTS = [
-  "Analyze my business payments, identify unpaid invoices, and explain my financial performance.",
-  "Find all overdue invoices and prepare reminders.",
-  "Create a PayPal payment order for $150.",
-  "Check my active fraud alerts and transaction anomalies.",
-  "Audit my refund patterns and customer return rates.",
+interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  lastMessage: string;
+}
+
+interface SamplePrompt {
+  label: string;
+  prompt: string;
+  isInvoice?: boolean;
+}
+
+const SAMPLE_PROMPTS: SamplePrompt[] = [
+  {
+    label: "📄 Create $50 Invoice for Acme",
+    prompt: "Create a new invoice for $50 for Acme",
+    isInvoice: true,
+  },
+  {
+    label: "📄 Generate $150 Invoice for Chloe",
+    prompt: "Generate a new invoice of $150 for Chloe Bennett due in 14 days",
+    isInvoice: true,
+  },
+  {
+    label: "📄 Bill $80 to Vanguard Logistics",
+    prompt: "Create a new unpaid invoice of $80 for Vanguard Logistics for logistics audit",
+    isInvoice: true,
+  },
+  {
+    label: "📊 Financial Overview",
+    prompt: "Analyze my business payments, identify unpaid invoices, and explain my financial performance.",
+  },
+  {
+    label: "✉️ Overdue Reminders",
+    prompt: "Find all overdue invoices and prepare reminders.",
+  },
+  {
+    label: "🛡️ Check Fraud Alerts",
+    prompt: "Check my active fraud alerts and transaction anomalies.",
+  },
+  {
+    label: "🔍 Audit Refunds",
+    prompt: "Audit my refund patterns and customer return rates.",
+  },
 ];
 
+const WELCOME_MESSAGE: Message = {
+  id: "welcome",
+  role: "assistant",
+  content: `Hello! I am **PayPilot AI**, your autonomous financial operations agent integrated with your merchant ledger and the **PayPal Developer Platform**.\n\nI can execute genuine backend operations such as:\n- **Creating client invoices** in Smart Collections with 1-click PayPal payment links\n- Auditing transaction histories and revenue performance\n- Detecting unpaid invoices and staging personalized payment reminders\n- Analyzing refund eligibility and routing approvals\n\n💡 *Tip: Click one of the suggested chips below or type "Create an invoice for $50 for Acme" to create an invoice directly.*`,
+  timestamp: "Ready",
+};
+
 export default function AssistantPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: `Hello! I am **PayPilot AI**, your autonomous financial operations agent integrated with your merchant ledger and the **PayPal Developer Platform**.\n\nI can execute genuine backend operations such as:\n- Auditing transaction histories and revenue performance\n- Creating genuine PayPal Orders v2\n- Detecting unpaid invoices and staging personalized payment reminders\n- Analyzing refund eligibility and routing approvals\n\nHow can I assist your financial operations today?`,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    },
-  ]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // 1. Fetch conversations list
+  const fetchConversations = async () => {
+    try {
+      const res = await fetch("/api/ai/conversations");
+      const data = await res.json();
+      if (data.conversations && Array.isArray(data.conversations)) {
+        setConversations(data.conversations);
+        return data.conversations;
+      }
+    } catch (err) {
+      console.error("Failed to load AI conversations list:", err);
+    }
+    return [];
+  };
+
+  // 2. Select & load specific conversation messages
+  const loadConversationMessages = async (id: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/ai/conversations/${id}`);
+      const data = await res.json();
+      if (data.messages) {
+        setMessages([WELCOME_MESSAGE, ...data.messages]);
+        setConversationId(id);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("paypilot_conversation_id", id);
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to load messages for conversation ${id}:`, err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. Initial mount: load conversations and restore last active session
+  useEffect(() => {
+    const init = async () => {
+      setLoadingHistory(true);
+      const convList = await fetchConversations();
+      
+      let targetId: string | null = null;
+      if (typeof window !== "undefined") {
+        targetId = localStorage.getItem("paypilot_conversation_id");
+      }
+
+      // If saved targetId exists in convList, load it
+      if (targetId && convList.some((c: any) => c.id === targetId)) {
+        await loadConversationMessages(targetId);
+      } else if (convList.length > 0) {
+        // Load the most recent conversation by default
+        await loadConversationMessages(convList[0].id);
+      } else {
+        setMessages([WELCOME_MESSAGE]);
+      }
+      setLoadingHistory(false);
+    };
+
+    init();
+  }, []);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
 
+  // Start a fresh new session
+  const handleStartNewChat = () => {
+    setConversationId(undefined);
+    setMessages([WELCOME_MESSAGE]);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("paypilot_conversation_id");
+    }
+  };
+
+  // Delete a specific conversation session
+  const handleDeleteConversation = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this conversation session?")) return;
+
+    try {
+      const res = await fetch(`/api/ai/conversations/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setConversations((prev) => prev.filter((c) => c.id !== id));
+        if (conversationId === id) {
+          handleStartNewChat();
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete conversation:", err);
+    }
+  };
+
+  // Send message
   const handleSend = async (messageText?: string) => {
     const textToSend = messageText || input;
     if (!textToSend.trim() || loading) return;
@@ -77,12 +221,20 @@ export default function AssistantPage() {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: textToSend }),
+        body: JSON.stringify({ message: textToSend, conversationId }),
       });
 
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "Failed to contact AI agent");
+      }
+
+      const activeId = data.conversationId;
+      if (activeId) {
+        setConversationId(activeId);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("paypilot_conversation_id", activeId);
+        }
       }
 
       const assistantMsg: Message = {
@@ -95,6 +247,8 @@ export default function AssistantPage() {
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
+      // Refresh left column conversations list
+      fetchConversations();
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
@@ -110,153 +264,299 @@ export default function AssistantPage() {
     }
   };
 
+  const activeConv = conversations.find((c) => c.id === conversationId);
+
   return (
     <DashboardLayout>
-      <div className="flex flex-col h-[calc(100vh-8.5rem)] max-w-5xl mx-auto space-y-4">
-        {/* Header Banner */}
-        <div className="flex items-center justify-between pb-2 border-b border-surface-border">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-primary to-accent-cyan flex items-center justify-center shadow-md">
-              <Bot className="w-5 h-5 text-white" />
+      <div className="flex h-[calc(100vh-8.5rem)] max-w-7xl mx-auto gap-4">
+        {/* Left Column: Chat History Sidebar */}
+        <div
+          className={`${
+            sidebarOpen ? "flex" : "hidden sm:flex sm:w-16"
+          } flex-col w-72 shrink-0 rounded-2xl bg-surface-card border border-surface-border overflow-hidden transition-all duration-200`}
+        >
+          {/* Sidebar Top: New Chat Action */}
+          <div className="p-3.5 border-b border-surface-border space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+                <History className="w-4 h-4 text-accent-cyan" />
+                <span className={sidebarOpen ? "inline" : "hidden sm:hidden"}>Chat History</span>
+              </div>
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-1 rounded-md text-slate-400 hover:text-white sm:hidden"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <span>AI Financial Operations Agent</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-indigo-300 font-mono">
-                  Tools v2 Active
-                </span>
-              </h1>
-              <p className="text-xs text-slate-400">
-                Connected to PayPal Sandbox Orders v2, Capture v2, and SQLite Ledger.
-              </p>
-            </div>
+
+            <button
+              onClick={handleStartNewChat}
+              className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary-hover hover:to-indigo-700 text-white font-semibold text-xs shadow-md transition-all flex items-center justify-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span className={sidebarOpen ? "inline" : "hidden sm:hidden"}>New Consultation</span>
+            </button>
+
+            {/* Quick Session Filter */}
+            {sidebarOpen && (
+              <div className="relative pt-1">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 translate-y-[-20%] text-slate-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Filter sessions..."
+                  className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-[#070B18] border border-surface-border text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-primary"
+                />
+              </div>
+            )}
           </div>
-          <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Human Approval Guard Enabled</span>
+
+          {/* Conversations Scrollable List */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1 divide-y divide-surface-border/20">
+            {loadingHistory ? (
+              <div className="p-4 text-center text-xs text-slate-500">Loading sessions...</div>
+            ) : conversations.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-500 space-y-2">
+                <MessageSquare className="w-6 h-6 mx-auto text-slate-600" />
+                <p>No past chat sessions.</p>
+                <p className="text-[11px] text-slate-600">Start asking questions to create your first session.</p>
+              </div>
+            ) : (
+              conversations
+                .filter((c) => !searchQuery || c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+                .map((c) => {
+                const isActive = c.id === conversationId;
+                const formattedTime = new Date(c.updatedAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                const formattedDate = new Date(c.updatedAt).toLocaleDateString([], {
+                  month: "short",
+                  day: "numeric",
+                });
+
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => loadConversationMessages(c.id)}
+                    className={`group relative p-3 rounded-xl cursor-pointer transition-all border ${
+                      isActive
+                        ? "bg-primary/20 border-primary/50 text-white shadow-sm"
+                        : "bg-[#090D1A]/50 border-transparent hover:bg-surface-border/40 text-slate-300 hover:text-white"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <MessageSquare
+                            className={`w-3.5 h-3.5 shrink-0 ${
+                              isActive ? "text-accent-cyan" : "text-slate-400 group-hover:text-slate-300"
+                            }`}
+                          />
+                          <p className="text-xs font-semibold truncate leading-tight">{c.title}</p>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-400">
+                          <span>
+                            {formattedDate}, {formattedTime}
+                          </span>
+                          <span>•</span>
+                          <span className="font-mono text-cyan-300">{c.messageCount} msgs</span>
+                        </div>
+                      </div>
+
+                      {/* Delete Session Button (Hover only) */}
+                      <button
+                        onClick={(e) => handleDeleteConversation(c.id, e)}
+                        title="Delete this chat session"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 transition-opacity"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Sidebar Footer */}
+          <div className="p-3 border-t border-surface-border text-[11px] text-slate-400 flex items-center justify-between">
+            <span className="text-slate-500">{conversations.length} total sessions</span>
+            <span className="font-mono text-cyan-400">NVIDIA NIM</span>
           </div>
         </div>
 
-        {/* Chat History Box */}
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-3.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              {msg.role === "assistant" && (
-                <div className="w-8 h-8 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0 mt-1">
-                  <Bot className="w-4 h-4 text-accent-cyan" />
-                </div>
-              )}
-
-              <div
-                className={`max-w-2xl rounded-2xl p-4 space-y-3 ${
-                  msg.role === "user"
-                    ? "bg-primary text-white ml-12"
-                    : "bg-surface-card border border-surface-border text-slate-200"
-                }`}
+        {/* Right Area: Main Chat Window */}
+        <div className="flex-1 flex flex-col rounded-2xl bg-surface-card border border-surface-border overflow-hidden">
+          {/* Header Banner */}
+          <div className="flex items-center justify-between p-4 border-b border-surface-border bg-[#0B1224]/80">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-1.5 rounded-lg bg-surface border border-surface-border text-slate-400 hover:text-white sm:hidden"
               >
-                {/* Executed Tools Badge (For Assistant) */}
-                {msg.toolCalls && msg.toolCalls.length > 0 && (
-                  <div className="space-y-1.5 pb-2 border-b border-surface-border/50">
-                    <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 tracking-wider">
-                      <Terminal className="w-3 h-3 text-emerald-400" />
-                      <span>Backend Tools Executed ({msg.toolCalls.length}):</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {msg.toolCalls.map((tc, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0A0E1A] border border-surface-border text-[11px] font-mono text-cyan-300"
-                        >
-                          <CheckCircle className="w-3 h-3 text-emerald-400" />
-                          <span>{tc.name}()</span>
-                        </span>
-                      ))}
-                    </div>
+                <Menu className="w-4 h-4" />
+              </button>
+
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-primary to-accent-cyan flex items-center justify-center shadow-md">
+                <Bot className="w-5 h-5 text-white" />
+              </div>
+
+              <div>
+                <h1 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>AI Financial Operations Agent</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-indigo-300 font-mono">
+                    NVIDIA NIM Active
+                  </span>
+                </h1>
+                <p className="text-xs text-slate-400">
+                  {activeConv ? activeConv.title : "Connected to PayPal Orders v2, Captures & Ledger"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="hidden md:flex items-center gap-2 text-xs text-slate-400">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Human Approval Guard Enabled</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Chat Messages Feed */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex gap-3.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                {msg.role === "assistant" && (
+                  <div className="w-8 h-8 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0 mt-1">
+                    <Bot className="w-4 h-4 text-accent-cyan" />
                   </div>
                 )}
 
-                {/* Message Content */}
-                <div className="text-xs sm:text-sm whitespace-pre-line leading-relaxed space-y-2">
-                  {msg.content}
-                </div>
-
-                {/* Timestamp and Latency */}
-                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
-                  <span>{msg.timestamp}</span>
-                  {msg.latencyMs && (
-                    <span className="font-mono text-slate-400">{msg.latencyMs}ms execution</span>
+                <div
+                  className={`max-w-2xl rounded-2xl p-4 space-y-3 ${
+                    msg.role === "user"
+                      ? "bg-primary text-white ml-12"
+                      : "bg-[#090D1A] border border-surface-border text-slate-200"
+                  }`}
+                >
+                  {/* Executed Tools Badge (For Assistant) */}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <div className="space-y-1.5 pb-2 border-b border-surface-border/50">
+                      <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 tracking-wider">
+                        <Terminal className="w-3 h-3 text-emerald-400" />
+                        <span>Backend Tools Executed ({msg.toolCalls.length}):</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {msg.toolCalls.map((tc, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#040711] border border-surface-border text-[11px] font-mono text-cyan-300"
+                          >
+                            <CheckCircle className="w-3 h-3 text-emerald-400" />
+                            <span>{tc.name}()</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   )}
+
+                  {/* Message Content with UI/UX Designer Rendering */}
+                  {msg.role === "assistant" ? (
+                    <FormattedChatMessage content={msg.content} />
+                  ) : (
+                    <div className="text-xs sm:text-sm whitespace-pre-line leading-relaxed font-medium">
+                      {msg.content}
+                    </div>
+                  )}
+
+                  {/* Timestamp and Latency */}
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
+                    <span>{msg.timestamp}</span>
+                    {msg.latencyMs && (
+                      <span className="font-mono text-slate-400">{msg.latencyMs}ms execution</span>
+                    )}
+                  </div>
                 </div>
+
+                {msg.role === "user" && (
+                  <div className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 mt-1">
+                    <User className="w-4 h-4 text-indigo-300" />
+                  </div>
+                )}
               </div>
-
-              {msg.role === "user" && (
-                <div className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 mt-1">
-                  <User className="w-4 h-4 text-indigo-300" />
-                </div>
-              )}
-            </div>
-          ))}
-
-          {loading && (
-            <div className="flex gap-3.5">
-              <div className="w-8 h-8 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0">
-                <Bot className="w-4 h-4 text-accent-cyan animate-pulse" />
-              </div>
-              <div className="p-4 rounded-2xl bg-surface-card border border-surface-border text-xs text-slate-300 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
-                <span>Auditing ledger &amp; executing PayPal tools...</span>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Prompt Suggestions */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-            <span className="text-[10px] uppercase font-bold text-slate-500 whitespace-nowrap">
-              Suggested:
-            </span>
-            {SAMPLE_PROMPTS.map((prompt, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSend(prompt)}
-                disabled={loading}
-                className="whitespace-nowrap px-3 py-1 rounded-full bg-surface-card border border-surface-border hover:border-primary/50 text-[11px] text-slate-300 hover:text-white transition-all disabled:opacity-50"
-              >
-                {prompt}
-              </button>
             ))}
+
+            {loading && (
+              <div className="flex gap-3.5">
+                <div className="w-8 h-8 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0">
+                  <Bot className="w-4 h-4 text-accent-cyan animate-pulse" />
+                </div>
+                <div className="p-4 rounded-2xl bg-[#090D1A] border border-surface-border text-xs text-slate-300 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
+                  <span>Auditing ledger &amp; executing PayPal tools via NVIDIA NIM...</span>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Box */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            className="flex items-center gap-2 p-1.5 rounded-xl bg-surface-card border border-surface-border focus-within:border-primary transition-all"
-          >
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask PayPilot to analyze revenue, create a PayPal order, or chase overdue invoices..."
-              disabled={loading}
-              className="flex-1 px-3 py-2 bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="p-2.5 rounded-lg bg-primary hover:bg-primary-hover text-white shadow-md shadow-primary/25 disabled:opacity-50 disabled:hover:bg-primary transition-all"
+          {/* Bottom Area: Suggestions & Input Form */}
+          <div className="p-3.5 border-t border-surface-border bg-[#0B1224]/80 space-y-2">
+            {/* Prompt Suggestions */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs no-scrollbar">
+              <span className="text-[10px] uppercase font-bold text-slate-500 whitespace-nowrap flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-accent-cyan" />
+                <span>Suggested:</span>
+              </span>
+              {SAMPLE_PROMPTS.map((item, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSend(item.prompt)}
+                  disabled={loading}
+                  title={item.prompt}
+                  className={`whitespace-nowrap px-3 py-1 rounded-full text-[11px] font-medium transition-all disabled:opacity-50 flex items-center gap-1.5 ${
+                    item.isInvoice
+                      ? "bg-gradient-to-r from-emerald-500/15 to-cyan-500/15 border border-emerald-500/40 text-emerald-300 hover:text-white hover:border-emerald-400 hover:shadow-sm hover:shadow-emerald-500/20"
+                      : "bg-surface-card border border-surface-border hover:border-primary/50 text-slate-300 hover:text-white"
+                  }`}
+                >
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Input Box */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSend();
+              }}
+              className="flex items-center gap-2 p-1.5 rounded-xl bg-[#090D1A] border border-surface-border focus-within:border-primary transition-all"
             >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder='Ask PayPilot: "Create an invoice for $50 for Acme", analyze revenue, or chase overdue invoices...'
+                disabled={loading}
+                className="flex-1 px-3 py-2 bg-transparent text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                className="p-2.5 rounded-lg bg-primary hover:bg-primary-hover text-white shadow-md shadow-primary/25 disabled:opacity-50 disabled:hover:bg-primary transition-all"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </DashboardLayout>

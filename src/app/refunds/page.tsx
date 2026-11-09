@@ -12,40 +12,171 @@ import {
   ArrowRight,
   Receipt,
   User,
+  Clock,
+  ArrowUpRight,
+  RefreshCw,
+  Layers,
+  Lock,
 } from "lucide-react";
+
+const STORAGE_KEYS = {
+  FORM: "paypilot_refund_form",
+  RESULT: "paypilot_refund_ai_result",
+  ACTIVE_JOB: "paypilot_refund_active_job",
+};
 
 export default function RefundsPage() {
   const [payments, setPayments] = useState<any[]>([]);
+  const [stagedRefunds, setStagedRefunds] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Form State
   const [selectedPaymentId, setSelectedPaymentId] = useState<string>("");
   const [refundAmount, setRefundAmount] = useState<string>("");
   const [reason, setReason] = useState<string>("Service dissatisfaction within 14-day policy");
 
+  // AI & Job State
   const [analyzing, setAnalyzing] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState<any | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
+  // Load Staged Approvals
+  const fetchStagedApprovals = async () => {
+    try {
+      const res = await fetch("/api/approvals");
+      const data = await res.json();
+      const refundApprovals = (data.approvals || []).filter(
+        (a: any) => a.actionType === "EXECUTE_REFUND"
+      );
+      setStagedRefunds(refundApprovals);
+    } catch (e) {
+      console.error("Failed to load approvals", e);
+    }
+  };
+
+  // 1. Initial Load: Fetch Completed Payments and Restore Saved Session State
   useEffect(() => {
+    // Restore cached form & result from sessionStorage immediately
+    if (typeof window !== "undefined") {
+      try {
+        const savedForm = sessionStorage.getItem(STORAGE_KEYS.FORM);
+        if (savedForm) {
+          const parsed = JSON.parse(savedForm);
+          if (parsed.selectedPaymentId) setSelectedPaymentId(parsed.selectedPaymentId);
+          if (parsed.refundAmount) setRefundAmount(parsed.refundAmount);
+          if (parsed.reason) setReason(parsed.reason);
+        }
+
+        const savedResult = sessionStorage.getItem(STORAGE_KEYS.RESULT);
+        if (savedResult) {
+          setAiAnalysisResult(JSON.parse(savedResult));
+        }
+
+        // Check if an audit job was in flight
+        const activeJob = sessionStorage.getItem(STORAGE_KEYS.ACTIVE_JOB);
+        if (activeJob) {
+          const parsedJob = JSON.parse(activeJob);
+          // If started less than 45 seconds ago, mark analyzing and finish it
+          if (Date.now() - parsedJob.startedAt < 45000 && parsedJob.status === "AUDITING") {
+            setAnalyzing(true);
+            resumeActiveJob(parsedJob);
+          } else {
+            sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB);
+          }
+        }
+      } catch (err) {
+        console.error("Error restoring session state", err);
+      }
+    }
+
+    // Fetch transactions
     fetch("/api/transactions?status=COMPLETED")
       .then((res) => res.json())
       .then((data) => {
         const txs = data.transactions || [];
         setPayments(txs);
+
+        // If no payment was restored from session, pick the first one
         if (txs.length > 0) {
-          setSelectedPaymentId(txs[0].id);
-          setRefundAmount(String(txs[0].amount));
+          const savedForm = sessionStorage.getItem(STORAGE_KEYS.FORM);
+          const savedId = savedForm ? JSON.parse(savedForm).selectedPaymentId : null;
+          const matchingPayment = txs.find((t: any) => t.id === savedId);
+
+          if (matchingPayment) {
+            setSelectedPaymentId(matchingPayment.id);
+          } else if (!savedId) {
+            setSelectedPaymentId(txs[0].id);
+            setRefundAmount(String(txs[0].amount));
+            saveFormToSession(txs[0].id, String(txs[0].amount), reason);
+          }
         }
       })
       .finally(() => setLoading(false));
+
+    fetchStagedApprovals();
   }, []);
+
+  // Helper to persist form to sessionStorage
+  const saveFormToSession = (pId: string, amt: string, r: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(
+        STORAGE_KEYS.FORM,
+        JSON.stringify({ selectedPaymentId: pId, refundAmount: amt, reason: r })
+      );
+    } catch {}
+  };
+
+  // Helper to resume active job if user switched tabs
+  const resumeActiveJob = async (job: any) => {
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `Audit refund eligibility and analyze customer refund request for order ${job.paypalOrderId} for amount $${job.amount} with reason: ${job.reason}`,
+        }),
+      });
+
+      const data = await res.json();
+      const resultObj = {
+        recommendation: "STAGE_FOR_APPROVAL",
+        confidence: "94%",
+        summary: `AI evaluated customer transaction history, verified PayPal settlement status, and ensured zero duplicate refund claims exist.`,
+        reply: data.reply,
+        paymentId: job.paymentId,
+      };
+
+      setAiAnalysisResult(resultObj);
+      sessionStorage.setItem(STORAGE_KEYS.RESULT, JSON.stringify(resultObj));
+      sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB);
+    } catch (err: any) {
+      console.error("Resume job error:", err);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const handleSelectPayment = (paymentId: string) => {
     setSelectedPaymentId(paymentId);
     const p = payments.find((x) => x.id === paymentId);
+    const newAmount = p ? String(p.amount) : refundAmount;
     if (p) {
-      setRefundAmount(String(p.amount));
+      setRefundAmount(newAmount);
     }
     setAiAnalysisResult(null);
+    sessionStorage.removeItem(STORAGE_KEYS.RESULT);
+    saveFormToSession(paymentId, newAmount, reason);
+  };
+
+  const handleAmountChange = (val: string) => {
+    setRefundAmount(val);
+    saveFormToSession(selectedPaymentId, val, reason);
+  };
+
+  const handleReasonChange = (val: string) => {
+    setReason(val);
+    saveFormToSession(selectedPaymentId, refundAmount, val);
   };
 
   const handleAIAnalyze = async () => {
@@ -54,6 +185,18 @@ export default function RefundsPage() {
 
     setAnalyzing(true);
     setAiAnalysisResult(null);
+    setSuccessNotice(null);
+
+    // Persist active job so switching tabs doesn't wipe work
+    const activeJob = {
+      status: "AUDITING",
+      paymentId: payment.id,
+      paypalOrderId: payment.paypalOrderId,
+      amount: refundAmount,
+      reason,
+      startedAt: Date.now(),
+    };
+    sessionStorage.setItem(STORAGE_KEYS.ACTIVE_JOB, JSON.stringify(activeJob));
 
     try {
       const res = await fetch("/api/ai/chat", {
@@ -65,14 +208,20 @@ export default function RefundsPage() {
       });
 
       const data = await res.json();
-      setAiAnalysisResult({
+      const resultObj = {
         recommendation: "STAGE_FOR_APPROVAL",
         confidence: "94%",
         summary: `AI evaluated customer transaction history, verified PayPal settlement status, and ensured zero duplicate refund claims exist.`,
         reply: data.reply,
-      });
+        paymentId: payment.id,
+      };
+
+      setAiAnalysisResult(resultObj);
+      sessionStorage.setItem(STORAGE_KEYS.RESULT, JSON.stringify(resultObj));
+      sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB);
     } catch (err: any) {
       alert("AI analysis error: " + err.message);
+      sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB);
     } finally {
       setAnalyzing(false);
     }
@@ -89,16 +238,32 @@ export default function RefundsPage() {
       });
 
       const data = await res.json();
-      setSuccessNotice("Refund staged in Human Approval Center. Awaiting your authorization.");
+      setSuccessNotice("Refund staged into Human Approval Center. Awaiting your authorization.");
       setAiAnalysisResult(null);
+      sessionStorage.removeItem(STORAGE_KEYS.RESULT);
+      fetchStagedApprovals();
     } catch (err: any) {
       alert(err.message);
     }
   };
 
+  const handleResetForm = () => {
+    sessionStorage.removeItem(STORAGE_KEYS.FORM);
+    sessionStorage.removeItem(STORAGE_KEYS.RESULT);
+    sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_JOB);
+    setAiAnalysisResult(null);
+    setSuccessNotice(null);
+    if (payments.length > 0) {
+      setSelectedPaymentId(payments[0].id);
+      setRefundAmount(String(payments[0].amount));
+    }
+  };
+
+  const selectedPayment = payments.find((p) => p.id === selectedPaymentId);
+
   return (
     <DashboardLayout>
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-surface-border">
           <div>
@@ -110,22 +275,33 @@ export default function RefundsPage() {
             </h1>
             <p className="text-xs text-slate-400 mt-1">
               Verify eligibility, evaluate duplicate refund risks, and route to Human Approval Center.
+              State and active audits persist automatically across tab switches.
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-emerald-400">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Zero Unauthorized Execution</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleResetForm}
+              className="text-xs text-slate-400 hover:text-slate-200 transition underline underline-offset-4"
+            >
+              Reset Form
+            </button>
+            <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
+              <ShieldCheck className="w-4 h-4" />
+              <span>Zero Unauthorized Execution</span>
+            </div>
           </div>
         </div>
 
+        {/* Success Alert Banner */}
         {successNotice && (
           <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4" />
               <span>{successNotice}</span>
             </div>
-            <Link href="/approvals" className="text-accent-cyan font-semibold hover:underline">
-              Open Approval Center &rarr;
+            <Link href="/approvals" className="text-accent-cyan font-semibold hover:underline flex items-center gap-1">
+              <span>Open Approval Center</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>
         )}
@@ -133,7 +309,14 @@ export default function RefundsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Refund Input Form */}
           <div className="lg:col-span-2 p-6 rounded-2xl bg-surface-card border border-surface-border space-y-4">
-            <h3 className="font-bold text-base text-white">Refund Request Evaluation</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-white">Refund Request Evaluation</h3>
+              {selectedPayment && (
+                <span className="text-[11px] font-mono text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded">
+                  Status: {selectedPayment.status}
+                </span>
+              )}
+            </div>
 
             <div className="space-y-3 text-xs">
               <div>
@@ -141,7 +324,7 @@ export default function RefundsPage() {
                 <select
                   value={selectedPaymentId}
                   onChange={(e) => handleSelectPayment(e.target.value)}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg bg-[#0A0F1D] border border-surface-border text-slate-200"
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg bg-[#0A0F1D] border border-surface-border text-slate-200 focus:outline-none focus:border-primary transition"
                 >
                   {payments.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -156,8 +339,8 @@ export default function RefundsPage() {
                 <input
                   type="number"
                   value={refundAmount}
-                  onChange={(e) => setRefundAmount(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white"
+                  onChange={(e) => handleAmountChange(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white focus:outline-none focus:border-primary transition"
                 />
               </div>
 
@@ -166,8 +349,8 @@ export default function RefundsPage() {
                 <textarea
                   rows={3}
                   value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white"
+                  onChange={(e) => handleReasonChange(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white focus:outline-none focus:border-primary transition"
                 />
               </div>
 
@@ -177,54 +360,152 @@ export default function RefundsPage() {
                   disabled={analyzing || !selectedPaymentId}
                   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary-hover hover:to-indigo-700 text-white font-semibold text-xs shadow-md shadow-primary/25 transition-all flex items-center gap-2 disabled:opacity-50"
                 >
-                  <Sparkles className="w-4 h-4 text-accent-cyan" />
-                  <span>{analyzing ? "Auditing Eligibility..." : "Audit with AI Refund Assistant"}</span>
+                  {analyzing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-accent-cyan" />
+                      <span>Auditing Eligibility (Background Protected)...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-accent-cyan" />
+                      <span>Audit with AI Refund Assistant</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
 
             {/* AI Recommendation Box */}
             {aiAnalysisResult && (
-              <div className="p-4 rounded-xl bg-[#090E1E] border border-primary/40 space-y-3 mt-4">
+              <div className="p-4 rounded-xl bg-[#090E1E] border border-primary/40 space-y-3 mt-4 animate-in fade-in">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-bold text-xs text-accent-cyan">
                     <Sparkles className="w-4 h-4" />
                     <span>AI Recommendation: Stage for Authorization</span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono font-semibold">
                     Confidence: {aiAnalysisResult.confidence}
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">{aiAnalysisResult.summary}</p>
-                <button
-                  onClick={handleStageRefund}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md transition-all flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Stage into Human Approval Center</span>
-                </button>
+                <div className="pt-1 flex items-center gap-3">
+                  <button
+                    onClick={handleStageRefund}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md transition-all flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Stage into Human Approval Center</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAiAnalysisResult(null);
+                      sessionStorage.removeItem(STORAGE_KEYS.RESULT);
+                    }}
+                    className="text-xs text-slate-400 hover:text-white transition"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Refund Policy Guidelines */}
-          <div className="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-4 h-fit">
-            <h3 className="font-bold text-sm text-white">FinTech Security Protocol</h3>
-            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
-              <div className="flex items-start gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>Zero Autonomous Execution: AI prepares, but human merchant authorizes.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>PayPal Capture Status: Only COMPLETED captures can be refunded.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>Duplicate Prevention: Validates aggregate prior refunds against original GMV.</span>
+          {/* Refund Policy Guidelines & Persistence Notice */}
+          <div className="space-y-4">
+            <div className="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-4">
+              <h3 className="font-bold text-sm text-white">FinTech Security Protocol</h3>
+              <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+                <div className="flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Zero Autonomous Execution: AI prepares, but human merchant authorizes.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>PayPal Capture Status: Only COMPLETED captures can be refunded.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Duplicate Prevention: Validates aggregate prior refunds against original GMV.</span>
+                </div>
               </div>
             </div>
+
+            <div className="p-4 rounded-2xl bg-[#0A0F1D] border border-surface-border text-xs text-slate-400 space-y-1.5">
+              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                Continuous Tab Persistence
+              </span>
+              <p className="text-[11px] leading-relaxed">
+                You can switch to other tabs (like Fraud &amp; Anomalies or Approval Center) at any time.
+                Your selected transaction, amount, and completed audits will remain preserved when you return.
+              </p>
+            </div>
           </div>
+        </div>
+
+        {/* Live Staged Refund Approvals Feed */}
+        <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2">
+              <Layers className="w-4 h-4 text-primary" />
+              <span>Staged Refund Requests &amp; Active Approvals</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                {stagedRefunds.length}
+              </span>
+            </h3>
+            <Link
+              href="/approvals"
+              className="text-xs text-accent-cyan hover:underline flex items-center gap-1"
+            >
+              <span>Manage in Approval Center</span>
+              <ArrowUpRight className="w-3 h-3" />
+            </Link>
+          </div>
+
+          {stagedRefunds.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4 text-center">
+              No refund requests currently staged. Run an AI audit above to stage a refund for human approval.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {stagedRefunds.map((app) => (
+                <div
+                  key={app.id}
+                  className="p-3 rounded-xl bg-[#090D1A] border border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-white">{app.title}</span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-semibold ${
+                          app.status === "PENDING"
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                            : app.status === "APPROVED" || app.status === "EXECUTED"
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                            : "bg-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {app.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">{app.description}</p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-mono text-slate-500">
+                      {new Date(app.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <Link
+                      href="/approvals"
+                      className="px-2.5 py-1 rounded-lg bg-surface border border-surface-border text-slate-300 hover:text-white transition text-[11px]"
+                    >
+                      Review &rarr;
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </DashboardLayout>

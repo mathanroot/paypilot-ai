@@ -138,12 +138,10 @@ export default function PayPalButton({
           // ignore cleanup errors
         }
       }
-      if (container && container.contains(targetDiv)) {
-        try {
-          container.removeChild(targetDiv);
-        } catch (e) {
-          // ignore unmanaged child removal
-        }
+      try {
+        targetDiv.remove();
+      } catch (e) {
+        // ignore unmanaged child removal
       }
     };
   }, [clientId, currency, amount, description, onSuccess, onError]);

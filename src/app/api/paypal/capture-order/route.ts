@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentMerchant } from "@/lib/auth";
-import { capturePayPalOrder } from "@/lib/paypal";
+import { capturePayPalOrder, getPayPalOrderDetails } from "@/lib/paypal";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
 
@@ -30,7 +30,26 @@ export async function POST(request: Request) {
     });
 
     // Execute capture against PayPal REST API v2
-    const captureResult = await capturePayPalOrder(orderId, idempotencyKey);
+    let captureResult: any;
+    try {
+      captureResult = await capturePayPalOrder(orderId, idempotencyKey);
+    } catch (captureErr: any) {
+      // If order was already captured on PayPal, check order details to get the captureId
+      try {
+        const orderDetails = await getPayPalOrderDetails(orderId);
+        if (orderDetails.status === "COMPLETED") {
+          captureResult = {
+            status: "COMPLETED",
+            captureId: orderDetails.purchase_units?.[0]?.payments?.captures?.[0]?.id,
+            purchase_units: orderDetails.purchase_units,
+          };
+        } else {
+          throw captureErr;
+        }
+      } catch {
+        throw captureErr;
+      }
+    }
 
     // Verify PayPal response status strictly
     const isCompleted =

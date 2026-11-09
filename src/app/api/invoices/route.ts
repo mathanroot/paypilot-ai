@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentMerchant } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { createPayPalOrder } from "@/lib/paypal";
 import { z } from "zod";
 
 const createInvoiceSchema = z.object({
@@ -52,6 +53,24 @@ export async function POST(request: Request) {
     const count = await prisma.invoice.count({ where: { merchantId: merchant.id } });
     const invoiceNumber = `INV-2026-${String(count + 1).padStart(3, "0")}`;
 
+    const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+
+    let paymentLink: string | null = null;
+    let paypalOrderId: string | null = null;
+
+    try {
+      const order = await createPayPalOrder({
+        amount,
+        currency: "USD",
+        description: `Invoice ${invoiceNumber} - ${customer?.name || "Client"}`,
+        customerEmail: customer?.email,
+      });
+      paymentLink = order.approveLink || order.links?.find((l: any) => l.rel === "approve")?.href || null;
+      paypalOrderId = order.id;
+    } catch (orderErr: any) {
+      console.warn("Could not immediately create PayPal Sandbox order:", orderErr.message);
+    }
+
     const invoice = await prisma.invoice.create({
       data: {
         merchantId: merchant.id,
@@ -62,7 +81,8 @@ export async function POST(request: Request) {
         dueDate: new Date(dueDate),
         status: "UNPAID",
         itemsSummary,
-        paymentLink: `https://www.sandbox.paypal.com/checkoutnow?token=DEMO-${invoiceNumber}`,
+        paypalInvoiceId: paypalOrderId,
+        paymentLink,
       },
       include: { customer: true },
     });

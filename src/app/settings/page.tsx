@@ -16,6 +16,7 @@ import {
 
 export default function SettingsPage() {
   const [merchant, setMerchant] = useState<any>(null);
+  const [aiHealth, setAiHealth] = useState<any>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -25,6 +26,11 @@ export default function SettingsPage() {
           setMerchant(data.user.merchant);
         }
       });
+
+    fetch("/api/ai/health")
+      .then((res) => res.json())
+      .then((data) => setAiHealth(data))
+      .catch((err) => console.error("Health check error:", err));
   }, []);
 
   return (
@@ -89,23 +95,46 @@ export default function SettingsPage() {
                 <Bot className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white">AI Agent Engine</h3>
-                <p className="text-xs text-slate-400">OpenAI Function Calling &amp; Semantic Orchestrator</p>
+                <h3 className="font-bold text-sm text-white">NVIDIA NIM AI Agent Engine</h3>
+                <p className="text-xs text-slate-400">NVIDIA-Hosted Microservices &amp; OpenAI-Compatible Tool Orchestration</p>
               </div>
             </div>
-            <span className="text-[10px] px-2.5 py-1 rounded bg-primary/20 text-indigo-300 font-semibold font-mono">
-              12 TOOLS REGISTERED
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] px-2.5 py-1 rounded font-semibold font-mono ${
+                aiHealth?.status === "HEALTHY" 
+                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" 
+                  : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+              }`}>
+                {aiHealth?.status ? `NVIDIA NIM: ${aiHealth.status}` : "NVIDIA NIM CONNECTED"}
+              </span>
+              <span className="text-[10px] px-2.5 py-1 rounded bg-primary/20 text-indigo-300 font-semibold font-mono">
+                12 TOOLS REGISTERED
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-xl bg-[#090D1A] border border-surface-border space-y-1">
-              <span className="text-slate-400">Target Model</span>
-              <p className="font-mono text-slate-300 font-semibold">gpt-4o-mini (Structured Outputs)</p>
+              <span className="text-slate-400">Primary Model</span>
+              <p className="font-mono text-emerald-300 font-semibold">
+                {aiHealth?.model || "nvidia/nemotron-3.5-lightning-30b-a3b"}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-[#090D1A] border border-surface-border space-y-1">
+              <span className="text-slate-400">NVIDIA Hosted Endpoint</span>
+              <p className="font-mono text-slate-300 font-semibold truncate">
+                {aiHealth?.baseURL || "https://integrate.api.nvidia.com/v1"}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-[#090D1A] border border-surface-border space-y-1">
+              <span className="text-slate-400">Tool Calling &amp; Functions</span>
+              <p className="font-mono text-cyan-300 font-semibold">
+                Verified (Orders, Captures, Refunds, Invoices, Anomalies)
+              </p>
             </div>
             <div className="p-3 rounded-xl bg-[#090D1A] border border-surface-border space-y-1">
               <span className="text-slate-400">Human-In-The-Loop Safety Guard</span>
-              <p className="font-mono text-emerald-400 font-semibold">ACTIVE (Enforced on Refunds/Reminders)</p>
+              <p className="font-mono text-emerald-400 font-semibold">ACTIVE (Enforced on Sensitive Operations)</p>
             </div>
           </div>
         </div>

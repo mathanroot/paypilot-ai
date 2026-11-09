@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14.2.15-black.svg)](https://nextjs.org/)
 [![PayPal Sandbox](https://img.shields.io/badge/PayPal-Orders_v2_%2B_Capture_v2-003087.svg)](https://developer.paypal.com/)
-[![OpenAI Tools](https://img.shields.io/badge/OpenAI-Function_Calling-10A37F.svg)](https://platform.openai.com/)
+[![NVIDIA NIM](https://img.shields.io/badge/NVIDIA_NIM-Nemotron_3.5_Lightning-76B900.svg)](https://build.nvidia.com/)
 [![Prisma ORM](https://img.shields.io/badge/Prisma-5.21.1-2D3748.svg)](https://www.prisma.io/)
 [![Vitest](https://img.shields.io/badge/Tests-11_Passed-6E9F18.svg)](https://vitest.dev/)
 
@@ -57,7 +57,7 @@ PayPilot AI is not another static dashboard or superficial chatbot. Its key diff
 | **Landing Page** | Fintech branding, architectural transparency, feature showcase, and instant demo access. |
 | **Merchant Authentication** | Secure sessions with HTTP-only cookies, bcrypt password hashing, and 1-click judge demo login. |
 | **Financial Command Center** | Live KPI metrics (GMV, net revenue, refund ratio, receivables), Recharts revenue trends, and date filters. |
-| **AI Payment Assistant** | Conversational agent powered by OpenAI function calling with tool execution transparency. |
+| **AI Payment Assistant** | Conversational agent powered by NVIDIA NIM tool/function calling with full execution transparency. |
 | **PayPal Payment Gateway** | End-to-end sandbox checkout flow: item selection, Orders v2 creation, client checkout, and Capture v2 verification. |
 | **AI Smart Collection Agent** | Overdue accounts receivable tracker; prepares diplomatic collection reminders with PayPal payment links. |
 | **AI Refund Manager** | Eligibility auditor, customer LTV evaluation, duplicate refund prevention, and approval staging. |
@@ -91,8 +91,10 @@ PayPilot AI integrates the official **PayPal Developer Platform (Sandbox)** usin
 ## 7. AI Implementation & Tools
 
 ### Architecture
-- **Model:** `gpt-4o-mini` with structured function calling.
-- **Fallback Engine:** Integrated deterministic semantic router ensuring offline hackathon judges can test all 12 tools without supplying personal OpenAI API keys.
+- **Provider:** NVIDIA NIM (National Institute of Standards / NVIDIA Inference Microservice) hosted at `https://integrate.api.nvidia.com/v1`.
+- **Model:** `nvidia/nemotron-3.5-lightning-30b-a3b` with structured function/tool calling.
+- **Connection Health Check:** `/api/ai/health` providing real-time latency and status probes.
+- **Fallback Engine:** Integrated deterministic semantic router ensuring offline hackathon judges can test all 12 tools without supplying personal NVIDIA API keys.
 
 ### 12 Concrete Backend AI Tools:
 1. `get_transactions` — Queries payment ledger with status and limit filtering.
@@ -120,7 +122,7 @@ Next.js 14 App Router (Full-Stack Gateway)
    ├── Auth Middleware (jose / bcryptjs)
    ├── API Route Handlers (Zod Schema Validation)
    │     ├── /api/paypal/* (Orders v2, Capture v2, Refund v2, Webhooks)
-   │     ├── /api/ai/chat (OpenAI Function Calling & Tool Execution)
+   │     ├── /api/ai/chat (NVIDIA NIM Function Calling & Tool Execution)
    │     ├── /api/approvals (Human-in-the-Loop Authorization Engine)
    │     └── /api/analytics, /api/invoices, /api/fraud, /api/audit
    │
@@ -139,7 +141,7 @@ Next.js 14 App Router (Full-Stack Gateway)
 - **Frontend:** Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS, Lucide Icons, Recharts.
 - **Backend:** Node.js, Next.js Route Handlers, Zod Validation, Jose (JWT), BcryptJS.
 - **Payment Infrastructure:** PayPal Developer Sandbox, Orders API v2, Capture API v2, Refund API v2, Webhooks.
-- **AI Infrastructure:** OpenAI API, Function Calling, Structured Tool Calling.
+- **AI Infrastructure:** NVIDIA NIM (Microservices hosted at https://integrate.api.nvidia.com/v1), Function Calling, Structured Tool Calling.
 - **Database & ORM:** PostgreSQL / SQLite, Prisma ORM 5.21.
 - **Testing:** Vitest 2.1 (11 automated test cases).
 
@@ -191,9 +193,10 @@ PAYPAL_WEBHOOK_ID=your_paypal_webhook_id
 PAYPAL_ENVIRONMENT=sandbox
 PAYPAL_API_URL=https://api-m.sandbox.paypal.com
 
-# AI Model Configuration
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-4o-mini
+# AI Model Configuration (NVIDIA NIM Microservices)
+NVIDIA_API_KEY=your_nvidia_api_key
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 
 # Database Configuration (SQLite default for local, PostgreSQL for Render)
 DATABASE_URL="file:./dev.db"

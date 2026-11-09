@@ -31,14 +31,21 @@ import {
 export default function DashboardPage() {
   const [filter, setFilter] = useState("30d");
   const [data, setData] = useState<any>(null);
+  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const fetchAnalytics = async (selectedFilter: string) => {
-    setLoading(true);
     try {
       const res = await fetch(`/api/analytics?filter=${selectedFilter}`);
       const json = await res.json();
       setData(json);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(`paypilot_dashboard_cache_${selectedFilter}`, JSON.stringify(json));
+        } catch (e) {
+          console.warn("Could not cache analytics to localStorage:", e);
+        }
+      }
     } catch (e) {
       console.error("Failed to load analytics", e);
     } finally {
@@ -47,34 +54,32 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
+    // On client mount, check cache first to display immediately
+    try {
+      const cached = localStorage.getItem(`paypilot_dashboard_cache_${filter}`);
+      if (cached) {
+        setData(JSON.parse(cached));
+      }
+    } catch {}
     fetchAnalytics(filter);
   }, [filter]);
 
-  const kpis = data?.kpis || {
-    totalCaptured: 4050,
-    netRevenue: 3700,
-    totalRefunded: 350,
-    successfulCount: 3,
-    pendingCount: 0,
-    overdueCount: 2,
-    outstandingInvoicesTotal: 2780,
-  };
+  const kpis = mounted ? data?.kpis : null;
+  const pendingApprovals = data?.pendingApprovals || [];
 
   const chartData = data?.chartData || [
-    { day: "Mon", revenue: 450 },
-    { day: "Tue", revenue: 1200 },
-    { day: "Wed", revenue: 800 },
-    { day: "Thu", revenue: 2400 },
-    { day: "Fri", revenue: 1850 },
-    { day: "Sat", revenue: 950 },
-    { day: "Sun", revenue: 1400 },
+    { day: "W-1", revenue: 450 },
+    { day: "W-2", revenue: 1200 },
+    { day: "W-3", revenue: 800 },
+    { day: "W-4", revenue: 2400 },
   ];
 
   return (
     <DashboardLayout>
       <div className="space-y-8">
         {/* Page Title & Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-surface-border">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
               <span>Financial Command Center</span>
@@ -115,12 +120,18 @@ export default function DashboardPage() {
                 <DollarSign className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-extrabold text-white">
-              ${kpis.totalCaptured.toLocaleString()}
-            </div>
+            {mounted && kpis ? (
+              <div className="text-2xl font-extrabold text-white">
+                ${Number(kpis.totalCaptured || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            ) : (
+              <div className="h-8 w-28 bg-slate-800/80 rounded animate-pulse my-0.5" />
+            )}
             <div className="flex items-center gap-1 text-[11px] text-emerald-400">
               <TrendingUp className="w-3.5 h-3.5" />
-              <span>+18.4% vs last period</span>
+              <span>
+                {filter === "today" ? "Captured today" : filter === "7d" ? "Last 7 days volume" : "+18.4% vs last period"}
+              </span>
             </div>
           </div>
 
@@ -132,11 +143,17 @@ export default function DashboardPage() {
                 <TrendingUp className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-extrabold text-white">
-              ${kpis.netRevenue.toLocaleString()}
-            </div>
+            {mounted && kpis ? (
+              <div className="text-2xl font-extrabold text-white">
+                ${Number(kpis.netRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            ) : (
+              <div className="h-8 w-28 bg-slate-800/80 rounded animate-pulse my-0.5" />
+            )}
             <div className="text-[11px] text-slate-400">
-              Net of ${kpis.totalRefunded} refunds
+              {mounted && kpis
+                ? `Net of $${Number(kpis.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} refunds`
+                : "Calculating refunds..."}
             </div>
           </div>
 
@@ -148,23 +165,33 @@ export default function DashboardPage() {
                 <AlertTriangle className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-extrabold text-amber-400">
-              ${kpis.outstandingInvoicesTotal.toLocaleString()}
-            </div>
+            {mounted && kpis ? (
+              <div className="text-2xl font-extrabold text-amber-400">
+                ${Number(kpis.outstandingInvoicesTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            ) : (
+              <div className="h-8 w-28 bg-slate-800/80 rounded animate-pulse my-0.5" />
+            )}
             <div className="text-[11px] text-slate-400">
-              {kpis.overdueCount} accounts overdue
+              {mounted && kpis ? `${kpis.overdueCount || 0} accounts overdue` : "Checking receivables..."}
             </div>
           </div>
 
-          {/* Active Settlement Rate */}
+          {/* Settlement Rate */}
           <div className="p-5 rounded-2xl bg-surface-card border border-surface-border glow-card space-y-2">
             <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
               <span>Settlement Rate</span>
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/15 text-accent-cyan flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center">
                 <CheckCircle className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-extrabold text-white">96.4%</div>
+            {mounted && kpis ? (
+              <div className="text-2xl font-extrabold text-white">
+                {kpis.settlementRate || "96.4%"}
+              </div>
+            ) : (
+              <div className="h-8 w-20 bg-slate-800/80 rounded animate-pulse my-0.5" />
+            )}
             <div className="text-[11px] text-emerald-400">PayPal verified capture</div>
           </div>
         </div>
@@ -177,7 +204,13 @@ export default function DashboardPage() {
               <div>
                 <h3 className="font-bold text-base text-white">Revenue Settlement Velocity</h3>
                 <p className="text-xs text-slate-400">
-                  Daily captured volume processed through PayPal Orders v2
+                  {filter === "today"
+                    ? "Hourly captured volume for Today (PayPal Orders v2)"
+                    : filter === "7d"
+                    ? "Daily captured volume across past 7 days"
+                    : filter === "90d"
+                    ? "Bi-weekly captured volume across 90 days"
+                    : "Weekly captured volume processed through PayPal Orders v2"}
                 </p>
               </div>
               <span className="text-xs font-semibold text-accent-cyan px-2.5 py-1 rounded-md bg-accent-cyan/10">
@@ -205,6 +238,7 @@ export default function DashboardPage() {
                       color: "#F8FAFC",
                       fontSize: "12px",
                     }}
+                    formatter={(val: any) => [`$${Number(val).toFixed(2)}`, "Captured Revenue"]}
                   />
                   <Area
                     type="monotone"
@@ -228,50 +262,60 @@ export default function DashboardPage() {
               </div>
               <h3 className="font-bold text-lg text-white">Autonomous Actions Staged</h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                PayPilot evaluated your accounts receivable and prepared 2 operations requiring your authorization:
+                PayPilot evaluated your accounts receivable and staged {pendingApprovals.length} operation{pendingApprovals.length === 1 ? "" : "s"} requiring your authorization:
               </p>
 
               <div className="space-y-2.5 pt-1">
-                <div className="p-3 rounded-xl bg-[#0B1021] border border-surface-border text-xs space-y-1">
-                  <div className="flex items-center justify-between font-semibold text-slate-200">
-                    <span>Overdue Reminder: StrataFlow</span>
-                    <span className="text-amber-400">$1,800.00</span>
+                {pendingApprovals.length > 0 ? (
+                  pendingApprovals.slice(0, 2).map((appr: any) => {
+                    let payload: any = {};
+                    try {
+                      payload = JSON.parse(appr.payload || "{}");
+                    } catch {
+                      payload = {};
+                    }
+                    return (
+                      <div key={appr.id} className="p-3 rounded-xl bg-[#0B1021] border border-surface-border text-xs space-y-1">
+                        <div className="flex items-center justify-between font-semibold text-slate-200">
+                          <span className="truncate pr-2">{appr.title}</span>
+                          <span className={appr.actionType === "EXECUTE_REFUND" ? "text-cyan-400" : "text-amber-400"}>
+                            ${payload.amount ? Number(payload.amount).toFixed(2) : "0.00"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 truncate">{appr.description}</p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-3 rounded-xl bg-[#0B1021] border border-surface-border text-center space-y-1">
+                    <CheckCircle className="w-4 h-4 text-emerald-400 mx-auto" />
+                    <p className="text-xs font-semibold text-slate-200">All Operations Authorized</p>
+                    <p className="text-[11px] text-slate-400">No pending items in approval queue.</p>
                   </div>
-                  <p className="text-[11px] text-slate-400">14 days overdue. Prepared with 1-click PayPal link.</p>
-                </div>
-
-                <div className="p-3 rounded-xl bg-[#0B1021] border border-surface-border text-xs space-y-1">
-                  <div className="flex items-center justify-between font-semibold text-slate-200">
-                    <span>Promotional Refund: ORD-6629104C</span>
-                    <span className="text-cyan-400">$150.00</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400">High LTV customer. AI recommends approval (92% conf).</p>
-                </div>
+                )}
               </div>
             </div>
 
             <Link
               href="/approvals"
-              className="w-full py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-md shadow-primary/30 transition-all flex items-center justify-center gap-2"
+              className="w-full py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-md transition-all flex items-center justify-center gap-1.5"
             >
               <span>Review in Approval Center</span>
-              <ArrowUpRight className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4" />
             </Link>
           </div>
         </div>
 
-        {/* Recent Transactions Table Preview */}
-        <div className="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-4">
-          <div className="flex items-center justify-between">
+        {/* Recent Ledger Activity */}
+        <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden">
+          <div className="p-5 border-b border-surface-border flex items-center justify-between">
             <div>
               <h3 className="font-bold text-base text-white">Verified PayPal Transactions</h3>
-              <p className="text-xs text-slate-400">
-                Direct Sandbox records with PayPal Order &amp; Capture IDs
-              </p>
+              <p className="text-xs text-slate-400">Direct Sandbox records with PayPal Order &amp; Capture IDs</p>
             </div>
             <Link
               href="/transactions"
-              className="text-xs font-medium text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+              className="text-xs text-accent-cyan hover:underline font-semibold flex items-center gap-1"
             >
               <span>View All Ledger Records</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -280,61 +324,61 @@ export default function DashboardPage() {
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-slate-400 border-b border-surface-border uppercase tracking-wider text-[10px]">
+              <thead className="bg-[#0A0F1F] text-slate-400 border-b border-surface-border uppercase tracking-wider text-[10px]">
                 <tr>
-                  <th className="pb-3 font-semibold">PayPal Order ID</th>
-                  <th className="pb-3 font-semibold">Customer / Description</th>
-                  <th className="pb-3 font-semibold">Amount</th>
-                  <th className="pb-3 font-semibold">Status</th>
-                  <th className="pb-3 font-semibold">Risk Score</th>
-                  <th className="pb-3 font-semibold text-right">Action</th>
+                  <th className="py-3 px-4 font-semibold">PayPal Order ID</th>
+                  <th className="py-3 px-4 font-semibold">Customer / Memo</th>
+                  <th className="py-3 px-4 font-semibold">Amount</th>
+                  <th className="py-3 px-4 font-semibold">Status</th>
+                  <th className="py-3 px-4 font-semibold">Settlement Time</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border/50 text-slate-200">
-                {(data?.recentTransactions || []).map((t: any) => (
-                  <tr key={t.id} className="hover:bg-surface/50 transition-colors">
-                    <td className="py-3 font-mono text-cyan-300 font-medium">
-                      {t.paypalOrderId}
-                    </td>
-                    <td className="py-3">
-                      <div className="font-medium text-slate-100">
-                        {t.customer?.name || "Direct Checkout"}
-                      </div>
-                      <div className="text-[11px] text-slate-400 truncate max-w-xs">
-                        {t.description || "Invoice Payment"}
-                      </div>
-                    </td>
-                    <td className="py-3 font-semibold text-white">
-                      ${Number(t.amount).toFixed(2)} {t.currency}
-                    </td>
-                    <td className="py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          t.status === "COMPLETED"
-                            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-                            : t.status === "REFUNDED"
-                            ? "bg-purple-500/15 text-purple-400 border border-purple-500/20"
-                            : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
-                        }`}
-                      >
-                        {t.status}
-                      </span>
-                    </td>
-                    <td className="py-3">
-                      <span className="font-mono text-xs">
-                        {t.riskScore || 5}/100 (Low)
-                      </span>
-                    </td>
-                    <td className="py-3 text-right">
-                      <Link
-                        href={`/transactions?search=${t.paypalOrderId}`}
-                        className="text-indigo-400 hover:text-indigo-300 font-medium"
-                      >
-                        Details
-                      </Link>
+                {(data?.recentTransactions || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500">
+                      No recent transactions recorded.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  (data?.recentTransactions || []).map((tx: any) => (
+                    <tr key={tx.id} className="hover:bg-surface/50 transition-colors">
+                      <td className="py-3.5 px-4 font-mono font-medium text-cyan-300">
+                        {tx.paypalOrderId}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="font-semibold text-white">{tx.customer?.name || "Direct Checkout"}</div>
+                        <div className="text-[11px] text-slate-400 truncate max-w-xs">{tx.description}</div>
+                      </td>
+                      <td className="py-3.5 px-4 font-bold text-white">
+                        ${Number(tx.amount).toFixed(2)} {tx.currency}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            tx.status === "COMPLETED"
+                              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                              : tx.status === "REFUNDED"
+                              ? "bg-purple-500/15 text-purple-400 border border-purple-500/20"
+                              : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                          }`}
+                        >
+                          {tx.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-400">
+                        {new Date(tx.createdAt).toLocaleDateString([], {
+                          month: "short",
+                          day: "numeric",
+                        })}{" "}
+                        {new Date(tx.createdAt).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

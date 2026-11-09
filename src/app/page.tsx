@@ -75,7 +75,7 @@ export default function LandingPage() {
 
           <p className="max-w-2xl mx-auto text-base sm:text-lg text-slate-300 font-normal leading-relaxed">
             PayPilot AI transforms merchant operations with autonomous financial agents powered by
-            the <strong>PayPal Developer Platform</strong> and OpenAI function calling. Manage
+            the <strong>PayPal Developer Platform</strong> and <strong>NVIDIA NIM</strong> function calling. Manage
             orders, dispatch reminders, and audit refunds using natural language—all governed by a
             strict <strong>Human Approval Center</strong>.
           </p>
@@ -236,7 +236,7 @@ export default function LandingPage() {
       <footer className="mt-auto border-t border-surface-border/60 py-8 px-6 text-center text-xs text-slate-400 space-y-2">
         <p>PayPilot AI — Built for the Global PayPal AI Hackathon 2026</p>
         <p className="text-slate-400">
-          Powered by PayPal Developer Sandbox &amp; OpenAI Function Calling. Open Source under MIT License.
+          Powered by PayPal Developer Sandbox &amp; NVIDIA NIM Microservices. Open Source under MIT License.
         </p>
       </footer>
     </div>

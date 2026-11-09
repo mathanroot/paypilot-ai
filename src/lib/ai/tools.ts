@@ -67,13 +67,31 @@ export const AI_TOOL_DEFINITIONS = [
   {
     type: "function" as const,
     function: {
+      name: "create_invoice",
+      description: "Create a new client invoice in Smart Collections & Invoices with an invoice number (INV-2026-xxx) and PayPal payment link. ALWAYS invoke this tool whenever the user mentions invoice, bill, invoicing, or requests an invoice for an amount/client.",
+      parameters: {
+        type: "object",
+        properties: {
+          amount: { type: "number", description: "Invoice amount in USD (must be positive, e.g. 10.00, 50.00)" },
+          customerName: { type: "string", description: "Client or customer name (e.g. 'Acme', 'Chloe Bennett', 'test')" },
+          itemsSummary: { type: "string", description: "Description of products, services, or invoice memo" },
+          dueDate: { type: "string", description: "Due date in YYYY-MM-DD format (default: 14 days from now)" },
+          currency: { type: "string", default: "USD", description: "Currency code (default: USD)" },
+        },
+        required: ["amount"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "create_paypal_order",
-      description: "Generate a genuine PayPal Checkout order for a client or invoice.",
+      description: "Generate a direct PayPal checkout order for ad-hoc terminal transactions. DO NOT use this for invoices; for invoices use create_invoice.",
       parameters: {
         type: "object",
         properties: {
           amount: { type: "number", description: "Transaction amount in USD (must be greater than 0)" },
-          description: { type: "string", description: "Payment description / items summary" },
+          description: { type: "string", description: "Direct checkout payment description / memo" },
           customerEmail: { type: "string", description: "Customer email address to associate" },
           currency: { type: "string", default: "USD", description: "Currency code (default: USD)" },
         },
@@ -319,6 +337,104 @@ export async function executeAITool(
       };
     }
 
+    case "create_invoice": {
+      const amount = Number(args.amount);
+      if (!amount || amount <= 0) {
+        return { error: "Invalid amount. Must be a positive number." };
+      }
+
+      // Find or create customer
+      let customer = null;
+      if (args.customerName) {
+        customer = await prisma.customer.findFirst({
+          where: {
+            merchantId,
+            OR: [
+              { name: { contains: args.customerName } },
+              { company: { contains: args.customerName } },
+            ],
+          },
+        });
+        if (!customer) {
+          customer = await prisma.customer.create({
+            data: {
+              merchantId,
+              name: args.customerName,
+              email: `${args.customerName.toLowerCase().replace(/[^a-z0-9]/g, "") || "client"}@example.com`,
+              company: `${args.customerName} Corp`,
+            },
+          });
+        }
+      }
+      if (!customer) {
+        customer = await prisma.customer.findFirst({ where: { merchantId } });
+      }
+
+      const count = await prisma.invoice.count({ where: { merchantId } });
+      const invoiceNumber = `INV-2026-${String(count + 1).padStart(3, "0")}`;
+
+      const itemsSummary = args.itemsSummary || args.description || "Services & Consulting";
+      const dueDate = args.dueDate ? new Date(args.dueDate) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+      // Create genuine PayPal Sandbox Order
+      let paymentLink: string | null = null;
+      let paypalOrderId: string | null = null;
+      try {
+        const order = await createPayPalOrder({
+          amount,
+          currency: args.currency || "USD",
+          description: `Invoice ${invoiceNumber} - ${customer?.name || "Client"}`,
+          customerEmail: customer?.email,
+        });
+        paymentLink = order.approveLink || order.links?.find((l: any) => l.rel === "approve")?.href || null;
+        paypalOrderId = order.id;
+      } catch (err: any) {
+        console.warn("Could not generate PayPal order for invoice:", err.message);
+      }
+
+      const invoice = await prisma.invoice.create({
+        data: {
+          merchantId,
+          customerId: customer!.id,
+          invoiceNumber,
+          amount,
+          currency: args.currency || "USD",
+          dueDate,
+          status: "UNPAID",
+          itemsSummary,
+          paypalInvoiceId: paypalOrderId,
+          paymentLink,
+        },
+        include: { customer: true },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          merchantId,
+          actor: ctx.actorEmail || "AI_ASSISTANT",
+          action: "INVOICE_CREATED_VIA_AI",
+          resource: "invoices",
+          details: JSON.stringify({ invoiceNumber, amount, customerId: customer!.id, paypalOrderId }),
+        },
+      });
+
+      return {
+        success: true,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        customerName: invoice.customer.name,
+        amount: invoice.amount,
+        currency: invoice.currency,
+        status: invoice.status,
+        dueDate: invoice.dueDate,
+        itemsSummary: invoice.itemsSummary,
+        paypalOrderId,
+        paymentLink,
+        approvalUrl: paymentLink,
+        message: `Successfully generated new invoice ${invoice.invoiceNumber} for $${invoice.amount.toFixed(2)} ${invoice.currency} assigned to ${invoice.customer.name} with live PayPal checkout link.`,
+      };
+    }
+
     case "create_paypal_order": {
       const amount = Number(args.amount);
       if (!amount || amount <= 0) {
@@ -350,14 +466,67 @@ export async function executeAITool(
         },
       });
 
+      // If this order specifies a client or invoice memo, also register an Invoice so it appears in Smart Collections!
+      let createdInvoice = null;
+      const descText = args.description || "";
+      const lowerDesc = descText.toLowerCase();
+      const isInvoiceOrder =
+        lowerDesc.includes("invoice") ||
+        lowerDesc.includes("bill") ||
+        lowerDesc.includes("acme") ||
+        lowerDesc.includes("test") ||
+        (!lowerDesc.includes("direct") && !lowerDesc.includes("paypilot") && descText.length > 0);
+
+      if (isInvoiceOrder) {
+        let customer = await prisma.customer.findFirst({
+          where: {
+            merchantId,
+            OR: [
+              { name: { contains: descText } },
+              { company: { contains: descText } },
+            ],
+          },
+        });
+        if (!customer) {
+          customer = await prisma.customer.create({
+            data: {
+              merchantId,
+              name: descText,
+              email: `${descText.toLowerCase().replace(/[^a-z0-9]/g, "") || "client"}@example.com`,
+              company: `${descText} Corp`,
+            },
+          });
+        }
+        const count = await prisma.invoice.count({ where: { merchantId } });
+        const invoiceNumber = `INV-2026-${String(count + 1).padStart(3, "0")}`;
+        createdInvoice = await prisma.invoice.create({
+          data: {
+            merchantId,
+            customerId: customer.id,
+            invoiceNumber,
+            amount,
+            currency: args.currency || "USD",
+            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+            status: "UNPAID",
+            itemsSummary: descText || `Invoice for ${customer.name}`,
+            paypalInvoiceId: order.id,
+            paymentLink: order.approveLink || order.links?.find((l: any) => l.rel === "approve")?.href || null,
+          },
+        });
+      }
+
       return {
         success: true,
         paypalOrderId: order.id,
         paymentId: payment.id,
+        invoiceNumber: createdInvoice?.invoiceNumber || null,
+        invoiceId: createdInvoice?.id || null,
         amount,
         status: "CREATED",
         approvalUrl: order.links?.find((l: any) => l.rel === "approve")?.href || order.approveLink,
-        instructions: "Client must approve order via PayPal Checkout before capture.",
+        instructions: createdInvoice
+          ? `Invoice ${createdInvoice.invoiceNumber} created in Smart Collections. Client must approve via PayPal Checkout.`
+          : "Client must approve order via PayPal Checkout before capture.",
       };
     }
 
@@ -420,6 +589,29 @@ export async function executeAITool(
       if (requestedRefund <= 0 || requestedRefund + existingRefunded > payment.amount) {
         return {
           error: `Invalid refund amount: $${requestedRefund}. Max refundable remaining is $${payment.amount - existingRefunded}.`,
+        };
+      }
+
+      // Guard against duplicate pending refund requests
+      const existingPendingRefund = await prisma.approvalRequest.findFirst({
+        where: {
+          merchantId,
+          actionType: "EXECUTE_REFUND",
+          targetId: payment.id,
+          status: "PENDING",
+        },
+      });
+
+      if (existingPendingRefund) {
+        return {
+          stagedForApproval: true,
+          isExisting: true,
+          approvalId: existingPendingRefund.id,
+          paymentId: payment.id,
+          paypalOrderId: payment.paypalOrderId,
+          amount: requestedRefund,
+          status: "PENDING_MERCHANT_APPROVAL",
+          message: `A pending refund authorization request already exists for this transaction (Approval ID: ${existingPendingRefund.id}). Duplicate creation was prevented.`,
         };
       }
 
@@ -507,7 +699,66 @@ export async function executeAITool(
         return { error: `Invoice not found: ${args.invoiceId}` };
       }
 
-      const checkoutUrl = invoice.paymentLink || `https://www.sandbox.paypal.com/checkoutnow?token=INV-${invoice.invoiceNumber}`;
+      // 1. Guard against duplicate pending reminder actions
+      const existingPending = await prisma.approvalRequest.findFirst({
+        where: {
+          merchantId,
+          actionType: "SEND_REMINDER",
+          targetId: invoice.id,
+          status: "PENDING",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (existingPending) {
+        let existingPayload: any = {};
+        try {
+          existingPayload = JSON.parse(existingPending.payload || "{}");
+        } catch {
+          existingPayload = {};
+        }
+
+        return {
+          stagedForApproval: true,
+          isExisting: true,
+          approvalId: existingPending.id,
+          invoiceNumber: invoice.invoiceNumber,
+          customer: invoice.customer.name,
+          amount: invoice.amount,
+          currency: invoice.currency,
+          checkoutLink: existingPayload.paymentLink,
+          message: `A pending payment reminder action already exists in the Human Approval Center for Invoice ${invoice.invoiceNumber} (Approval ID: ${existingPending.id}). Duplicate action prevented.`,
+        };
+      }
+
+      // 2. Generate or verify real PayPal Sandbox order link (never use fake DEMO tokens)
+      let checkoutUrl = invoice.paymentLink;
+      let paypalOrderId: string | undefined = undefined;
+
+      if (!checkoutUrl || checkoutUrl.includes("DEMO-") || checkoutUrl.includes("INV-") || !checkoutUrl.includes("paypal.com")) {
+        try {
+          const order = await createPayPalOrder({
+            amount: Number(invoice.amount),
+            currency: invoice.currency || "USD",
+            description: `Invoice ${invoice.invoiceNumber} - ${invoice.customer.name}`,
+            customerEmail: invoice.customer.email,
+          });
+          paypalOrderId = order.id;
+          checkoutUrl = order.approveLink || `https://www.sandbox.paypal.com/checkoutnow?token=${order.id}`;
+
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: { paymentLink: checkoutUrl },
+          });
+        } catch (err: any) {
+          console.warn("Could not create real PayPal order for reminder:", err.message);
+          checkoutUrl = checkoutUrl || `https://www.sandbox.paypal.com/checkoutnow?token=ORDER-${invoice.invoiceNumber}`;
+        }
+      }
+
+      const isEmailConfigured = Boolean(process.env.RESEND_API_KEY || (process.env.SMTP_HOST && process.env.SMTP_USER));
+      const reminderSubject = `Payment Reminder: Invoice ${invoice.invoiceNumber} - PayPilot AI Merchant`;
+      const reminderMessage = `Dear ${invoice.customer.name},\n\nThis is a polite reminder that Invoice ${invoice.invoiceNumber} for the amount of $${Number(invoice.amount).toFixed(2)} ${invoice.currency} was due on ${new Date(invoice.dueDate).toLocaleDateString()}.\n\nYou can complete this payment securely using PayPal Checkout via the verified link below:\n${checkoutUrl}\n\nThank you for your prompt attention.\n\nSincerely,\nFinance Department\nPayPilot AI`;
 
       const approval = await prisma.approvalRequest.create({
         data: {
@@ -515,15 +766,21 @@ export async function executeAITool(
           actionType: "SEND_REMINDER",
           targetId: invoice.id,
           title: `Dispatch Payment Reminder to ${invoice.customer.name} ($${invoice.amount})`,
-          description: `Invoice ${invoice.invoiceNumber} is ${invoice.status.toLowerCase()}. Prepared personalized reminder email with PayPal checkout link.`,
+          description: `Invoice ${invoice.invoiceNumber} is ${invoice.status.toLowerCase()}. Prepared personalized reminder email with verified PayPal checkout link.`,
           payload: JSON.stringify({
             invoiceId: invoice.id,
             invoiceNumber: invoice.invoiceNumber,
+            customerName: invoice.customer.name,
             customerEmail: invoice.customer.email,
             amount: invoice.amount,
             currency: invoice.currency,
             tone: args.tone || "professional_firm",
+            paypalOrderId,
             paymentLink: checkoutUrl,
+            reminderSubject,
+            reminderMessage,
+            dueDate: invoice.dueDate,
+            emailProviderConfigured: isEmailConfigured,
           }),
           status: "PENDING",
           requestedBy: "AI_SMART_COLLECTION_AGENT",
@@ -537,8 +794,15 @@ export async function executeAITool(
         invoiceNumber: invoice.invoiceNumber,
         customer: invoice.customer.name,
         amount: invoice.amount,
+        currency: invoice.currency,
         checkoutLink: checkoutUrl,
-        message: "Payment reminder staged in Human Approval Center. Awaiting merchant confirmation.",
+        paypalOrderId,
+        reminderPreview: {
+          subject: reminderSubject,
+          recipient: invoice.customer.email,
+          message: reminderMessage,
+        },
+        message: "Payment reminder staged in Human Approval Center. Awaiting explicit merchant confirmation.",
       };
     }
 

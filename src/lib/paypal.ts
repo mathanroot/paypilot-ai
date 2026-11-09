@@ -93,6 +93,7 @@ export interface CreateOrderParams {
   description?: string;
   referenceId?: string;
   customId?: string;
+  customerEmail?: string;
   returnUrl?: string;
   cancelUrl?: string;
   items?: Array<{
@@ -129,6 +130,7 @@ export async function createPayPalOrder(params: CreateOrderParams) {
       ],
       amount: formattedAmount,
       currency,
+      approveLink: `https://www.sandbox.paypal.com/checkoutnow?token=${mockOrderId}`,
       demoMode: true,
     };
   }
@@ -164,6 +166,7 @@ export async function createPayPalOrder(params: CreateOrderParams) {
       return_url: params.returnUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=success`,
       cancel_url: params.cancelUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=cancel`,
     },
+    payer: params.customerEmail ? { email_address: params.customerEmail } : undefined,
   };
 
   const response = await fetch(`${config.apiUrl}/v2/checkout/orders`, {
@@ -324,7 +327,12 @@ export async function refundPayPalCapture(params: {
 }) {
   const config = getPayPalConfig();
 
-  if (!isPayPalConfigured() || params.captureId.startsWith("CAP-TEST") || params.captureId.startsWith("CAP-DEMO")) {
+  if (
+    !isPayPalConfigured() ||
+    params.captureId.startsWith("CAP-") ||
+    params.captureId.startsWith("DEMO-") ||
+    params.captureId.startsWith("MOCK-")
+  ) {
     const mockRefundId = `REF-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 8999 + 1000)}`;
     return {
       id: mockRefundId,
@@ -333,7 +341,7 @@ export async function refundPayPalCapture(params: {
         value: params.amount ? Number(params.amount).toFixed(2) : "10.00",
         currency_code: params.currency || "USD",
       },
-      note_to_payer: params.note || "Refund processed via PayPilot AI",
+      note_to_payer: params.note || "Refund processed via PayPilot AI (Demo Sandbox)",
     };
   }
 

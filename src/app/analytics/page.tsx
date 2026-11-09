@@ -71,7 +71,9 @@ export default function AnalyticsPage() {
           <div className="p-5 rounded-2xl bg-surface-card border border-surface-border space-y-2">
             <span className="text-xs text-slate-400">Accounts Receivable Turnover</span>
             <div className="text-2xl font-bold text-accent-cyan">5.8x</div>
-            <p className="text-[11px] text-slate-400">Based on $4,050 settled volume</p>
+            <p className="text-[11px] text-slate-400">
+              Based on ${data?.kpis?.totalCaptured ? data.kpis.totalCaptured.toLocaleString() : "..."} settled volume
+            </p>
           </div>
 
           <div className="p-5 rounded-2xl bg-surface-card border border-surface-border space-y-2">
