@@ -26,10 +26,50 @@ export interface FinancialReportData {
 }
 
 /**
- * Extracts structured financial metrics, takeaways, and details from an AI message markdown text
+ * Strips emojis, variation selectors, and non-printable unicode glyphs
+ * that cause mojibake (e.g. Ø=ÜÄ) in standard PDF font encodings.
+ */
+export function sanitizePdfText(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "") // All 4-byte surrogate pair emojis & symbols
+    .replace(/[\u2600-\u27BF\uFE00-\uFE0F]/g, "") // Dingbats, symbols & variation selectors
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ") // Printable Latin-1 only
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Checks if a string is conversational chat filler rather than genuine financial data
+ */
+function isConversationalFiller(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("click the") ||
+    lower.includes("click below") ||
+    lower.includes("download") ||
+    lower.includes("format you need") ||
+    lower.includes("button corresponding") ||
+    lower.includes("export button") ||
+    lower.includes("1-click export") ||
+    lower.includes("would you like") ||
+    lower.includes("how would you like") ||
+    lower.includes("let me know") ||
+    lower.includes("ready for direct download") ||
+    lower.includes("official verified figures pulled directly") ||
+    lower.includes("your cash flow metrics match") ||
+    lower.includes("can you make") ||
+    lower.includes("just click") ||
+    lower.includes("the file will be generated") ||
+    lower.includes("below to download")
+  );
+}
+
+/**
+ * Extracts structured financial metrics, tables, takeaways, and details from an AI message markdown text
  */
 export function parseFinancialContent(content: string): FinancialReportData {
-  let title = "Executive Financial Summary";
+  let rawTitle = "Executive Financial Summary";
   const metrics: MetricItem[] = [];
   const details: DetailItem[] = [];
   const takeaways: string[] = [];
@@ -37,27 +77,33 @@ export function parseFinancialContent(content: string): FinancialReportData {
 
   const lines = content.split("\n").map((l) => l.trim());
 
-  // Detect Title from header or bold first line
+  // 1. Detect Title from headers
   for (const line of lines) {
     if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) {
-      title = line.replace(/^#{1,4}\s+/, "").replace(/[\*\_]/g, "").trim();
+      rawTitle = line.replace(/^#{1,4}\s+/, "").replace(/[\*\_`]/g, "").trim();
       break;
-    } else if (line.toLowerCase().includes("gross captured volume") || line.toLowerCase().includes("financial performance")) {
-      title = line.replace(/[\*\_]/g, "").trim();
+    } else if (
+      line.toLowerCase().includes("revenue summary") ||
+      line.toLowerCase().includes("gross captured volume") ||
+      line.toLowerCase().includes("financial performance")
+    ) {
+      rawTitle = line.replace(/[\*\_`]/g, "").trim();
       break;
     }
   }
 
-  // Extract key metrics from bullet points or lines like:
-  // - **Gross Captured Volume:** $4,193.00
-  // • Gross Volume: $13,132.97
-  // - Total Refunded: $983.00
+  const cleanTitle = sanitizePdfText(rawTitle) || "Executive Financial Summary";
+
+  // Regex for bullet metrics: - **Gross Captured Volume:** $4,193.00
   const metricRegex = /^(?:[-*•]|\d+\.)\s*\*{0,2}([^:*]+?)\*{0,2}:?\s*\*{0,2}([\$€£A-Za-z0-9,.\s/%-]+)\*{0,2}$/;
 
   let currentSection: "general" | "takeaways" | "recommendations" = "general";
 
+  // 2. Scan lines for Markdown tables, bullet metrics, takeaways, and recommendations
   for (const line of lines) {
     const lower = line.toLowerCase();
+
+    // Section header tracking
     if (lower.includes("takeaway") || lower.includes("key takeaway") || lower.includes("insight")) {
       currentSection = "takeaways";
       continue;
@@ -67,68 +113,122 @@ export function parseFinancialContent(content: string): FinancialReportData {
       continue;
     }
 
-    if (currentSection === "takeaways") {
-      if (line.startsWith("- ") || line.startsWith("* ") || line.startsWith("• ")) {
-        const clean = line.replace(/^[-*•]\s+/, "").replace(/[\*\_]/g, "").trim();
-        if (clean) takeaways.push(clean);
-      } else if (line.startsWith("#") || line.length === 0) {
-        if (line.startsWith("#")) currentSection = "general";
-      } else if (!line.startsWith("-")) {
-        takeaways.push(line.replace(/[\*\_]/g, "").trim());
+    // Parse Markdown tables (| Metric | Value |)
+    if (line.startsWith("|") && line.endsWith("|")) {
+      const cols = line
+        .split("|")
+        .slice(1, -1)
+        .map((c) => sanitizePdfText(c.replace(/[\*\_`]/g, "").trim()));
+
+      if (cols.length >= 2) {
+        const col0Lower = cols[0].toLowerCase();
+        const col1Lower = cols[1].toLowerCase();
+
+        // Skip markdown table dividers and table headers
+        if (
+          col0Lower.includes("---") ||
+          col0Lower === "metric" ||
+          col0Lower === "parameter" ||
+          col0Lower === "kpi" ||
+          col0Lower === "item" ||
+          col0Lower === "description"
+        ) {
+          continue;
+        }
+
+        const label = cols[0];
+        const val = cols[1];
+
+        if (label && val && !isConversationalFiller(label) && !isConversationalFiller(val)) {
+          if (
+            label.toLowerCase().includes("volume") ||
+            label.toLowerCase().includes("revenue") ||
+            label.toLowerCase().includes("refund") ||
+            label.toLowerCase().includes("rate") ||
+            label.toLowerCase().includes("receivable") ||
+            label.toLowerCase().includes("transaction") ||
+            label.toLowerCase().includes("count") ||
+            label.toLowerCase().includes("ticket") ||
+            label.toLowerCase().includes("balance") ||
+            label.toLowerCase().includes("fee")
+          ) {
+            metrics.push({ label, value: val });
+          } else {
+            details.push({ key: label, value: val });
+          }
+        }
       }
       continue;
     }
 
+    // Parse Takeaways
+    if (currentSection === "takeaways") {
+      if (line.startsWith("- ") || line.startsWith("* ") || line.startsWith("• ")) {
+        const clean = sanitizePdfText(line.replace(/^[-*•]\s+/, "").replace(/[\*\_`]/g, "").trim());
+        if (clean && !isConversationalFiller(clean)) takeaways.push(clean);
+      } else if (line.startsWith("#")) {
+        currentSection = "general";
+      } else if (!line.startsWith("-") && line.length > 0) {
+        const clean = sanitizePdfText(line.replace(/[\*\_`]/g, "").trim());
+        if (clean && !isConversationalFiller(clean)) takeaways.push(clean);
+      }
+      continue;
+    }
+
+    // Parse Recommendations
     if (currentSection === "recommendations") {
       if (line.startsWith("- ") || line.startsWith("* ") || line.startsWith("• ") || /^\d+\./.test(line)) {
-        const clean = line.replace(/^(?:[-*•]|\d+\.)\s+/, "").replace(/[\*\_]/g, "").trim();
-        if (clean) recommendations.push(clean);
+        const clean = sanitizePdfText(line.replace(/^(?:[-*•]|\d+\.)\s+/, "").replace(/[\*\_`]/g, "").trim());
+        if (clean && !isConversationalFiller(clean)) recommendations.push(clean);
       } else if (line.startsWith("#")) {
         currentSection = "general";
       }
       continue;
     }
 
-    // Try parsing as metric
-    const match = line.match(metricRegex);
-    if (match) {
-      const label = match[1].replace(/[\*\_]/g, "").trim();
-      const val = match[2].replace(/[\*\_]/g, "").trim();
-      if (
-        label.toLowerCase().includes("volume") ||
-        label.toLowerCase().includes("revenue") ||
-        label.toLowerCase().includes("refund") ||
-        label.toLowerCase().includes("rate") ||
-        label.toLowerCase().includes("receivable") ||
-        label.toLowerCase().includes("count") ||
-        label.toLowerCase().includes("ticket") ||
-        label.toLowerCase().includes("status") ||
-        label.toLowerCase().includes("amount")
-      ) {
-        metrics.push({ label, value: val });
-      } else {
-        details.push({ key: label, value: val });
+    // Parse metric bullet if table didn't already populate metrics
+    if (metrics.length === 0) {
+      const match = line.match(metricRegex);
+      if (match) {
+        const label = sanitizePdfText(match[1].replace(/[\*\_`]/g, "").trim());
+        const val = sanitizePdfText(match[2].replace(/[\*\_`]/g, "").trim());
+
+        if (!isConversationalFiller(label) && !isConversationalFiller(val)) {
+          if (
+            label.toLowerCase().includes("volume") ||
+            label.toLowerCase().includes("revenue") ||
+            label.toLowerCase().includes("refund") ||
+            label.toLowerCase().includes("rate") ||
+            label.toLowerCase().includes("receivable") ||
+            label.toLowerCase().includes("count") ||
+            label.toLowerCase().includes("ticket") ||
+            label.toLowerCase().includes("amount")
+          ) {
+            metrics.push({ label, value: val });
+          } else {
+            details.push({ key: label, value: val });
+          }
+        }
       }
     }
   }
 
-  // Fallback defaults if metrics list is sparse
+  // Fallback defaults if metrics list is still sparse
   if (metrics.length === 0) {
-    // Look for numbers with dollar signs
     const dollars = content.match(/\$\d[\d,]*(?:\.\d+)?/g);
     if (dollars && dollars.length > 0) {
-      metrics.push({ label: "Reported Volume", value: dollars[0] });
+      metrics.push({ label: "Gross Volume", value: dollars[0] });
       if (dollars.length > 1) {
-        metrics.push({ label: "Secondary Amount", value: dollars[1] });
+        metrics.push({ label: "Net Volume", value: dollars[1] });
       }
     }
   }
 
   return {
-    title: title || "PayPilot AI Financial Report",
-    subtitle: "PayPal Developer Sandbox Verified • Instant Settlement Ledger",
+    title: cleanTitle,
+    subtitle: "PayPal Developer Sandbox Verified • Official Settlement Ledger",
     metrics,
-    details,
+    details: details.filter((d) => !isConversationalFiller(d.key) && !isConversationalFiller(d.value)),
     takeaways,
     recommendations,
     rawContent: content,
@@ -136,7 +236,7 @@ export function parseFinancialContent(content: string): FinancialReportData {
 }
 
 /**
- * 1. Export High-Quality Financial PDF
+ * 1. Export High-Quality Financial PDF using Times New Roman Font
  */
 export function exportToPdf(data: FinancialReportData, filename?: string): void {
   const doc = new jsPDF({
@@ -147,32 +247,33 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 16;
+  const margin = 18;
   const contentWidth = pageWidth - margin * 2;
 
-  // Header Banner Background (Deep Navy FinTech)
+  // Header Banner Background (Deep Executive Navy)
   doc.setFillColor(11, 18, 38);
-  doc.rect(0, 0, pageWidth, 42, "F");
+  doc.rect(0, 0, pageWidth, 44, "F");
 
   // Accent Line (Cyan #00D4FF)
   doc.setFillColor(0, 212, 255);
-  doc.rect(0, 42, pageWidth, 2, "F");
+  doc.rect(0, 44, pageWidth, 1.8, "F");
 
-  // PayPilot Logo / Title
+  // PayPilot Logo / Title with Times New Roman Bold
   doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
+  doc.setFont("times", "bold");
+  doc.setFontSize(22);
   doc.text("PayPilot AI", margin, 18);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
+  doc.setFont("times", "italic");
+  doc.setFontSize(9.5);
   doc.setTextColor(0, 212, 255);
-  doc.text("AUTONOMOUS FINTECH & PAYPAL OPERATING SYSTEM", margin, 24);
+  doc.text("AUTONOMOUS FINTECH & PAYPAL OPERATING SYSTEM", margin, 25);
 
   // Subtitle / Verified badge in header
-  doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184); // Slate-400
-  doc.text("PayPal Sandbox Verified  •  Orders v2 & REST Capture Engine", margin, 32);
+  doc.setFont("times", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text("PayPal Sandbox Verified  •  Orders v2 & REST Capture Engine", margin, 34);
 
   // Date on top right
   const now = new Date();
@@ -185,45 +286,47 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
     hour: "2-digit",
     minute: "2-digit",
   });
-  doc.setFontSize(9);
+  doc.setFont("times", "normal");
+  doc.setFontSize(9.5);
   doc.setTextColor(226, 232, 240);
   doc.text(`Generated: ${dateStr} ${timeStr}`, pageWidth - margin, 18, { align: "right" });
-  doc.setFontSize(8);
+  doc.setFont("times", "italic");
+  doc.setFontSize(8.5);
   doc.setTextColor(148, 163, 184);
-  doc.text("Environment: PayPal Sandbox Live", pageWidth - margin, 24, { align: "right" });
+  doc.text("Environment: PayPal Sandbox Live", pageWidth - margin, 25, { align: "right" });
 
-  let cursorY = 54;
+  let cursorY = 56;
 
-  // Report Title
+  // Report Title (Times New Roman Bold, sanitized against emojis)
+  const cleanTitle = sanitizePdfText(data.title) || "Executive Financial Summary";
   doc.setTextColor(15, 23, 42); // Slate-900
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text(data.title, margin, cursorY);
+  doc.setFont("times", "bold");
+  doc.setFontSize(17);
+  doc.text(cleanTitle, margin, cursorY);
   cursorY += 6;
 
-  // Subtitle
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139); // Slate-500
-  doc.text(
-    data.subtitle || "Official verified ledger summary exported from PayPilot AI Command Center",
-    margin,
-    cursorY
+  // Subtitle (Times New Roman Italic)
+  const cleanSubtitle = sanitizePdfText(
+    data.subtitle || "Official verified settlement ledger exported from PayPilot AI Command Center"
   );
+  doc.setFont("times", "italic");
+  doc.setFontSize(9.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(cleanSubtitle, margin, cursorY);
   cursorY += 10;
 
   // Render Key Metrics Cards in a 2 or 3 Column Grid
   if (data.metrics && data.metrics.length > 0) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
+    doc.setFont("times", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(51, 65, 85);
     doc.text("EXECUTIVE KEY METRICS", margin, cursorY);
     cursorY += 4;
 
     const cardsPerRow = data.metrics.length <= 4 ? 2 : 3;
     const cardGap = 4;
     const cardWidth = (contentWidth - (cardsPerRow - 1) * cardGap) / cardsPerRow;
-    const cardHeight = 20;
+    const cardHeight = 22;
 
     data.metrics.forEach((m, idx) => {
       const col = idx % cardsPerRow;
@@ -232,70 +335,76 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
       const cardY = cursorY + row * (cardHeight + cardGap);
 
       // Card Background
-      doc.setFillColor(248, 250, 252); // Slate-50
-      doc.setDrawColor(226, 232, 240); // Slate-200
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
       doc.roundedRect(cardX, cardY, cardWidth, cardHeight, 2, 2, "FD");
 
-      // Cyan accent pip
-      doc.setFillColor(0, 112, 186); // PayPal Blue
+      // PayPal Blue accent pip
+      doc.setFillColor(0, 112, 186);
       doc.rect(cardX, cardY, 2.5, cardHeight, "F");
 
-      // Label
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7.5);
+      // Label (Times New Roman Bold)
+      doc.setFont("times", "bold");
+      doc.setFontSize(8);
       doc.setTextColor(100, 116, 139);
-      doc.text(m.label.toUpperCase().slice(0, 32), cardX + 6, cardY + 7);
+      const safeLabel = sanitizePdfText(m.label).toUpperCase().slice(0, 36);
+      doc.text(safeLabel, cardX + 6, cardY + 7.5);
 
-      // Value
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
+      // Value (Times New Roman Bold)
+      doc.setFont("times", "bold");
+      doc.setFontSize(13);
       doc.setTextColor(15, 23, 42);
-      doc.text(m.value, cardX + 6, cardY + 15);
+      const safeVal = sanitizePdfText(m.value);
+      doc.text(safeVal, cardX + 6, cardY + 16.5);
     });
 
     const totalRows = Math.ceil(data.metrics.length / cardsPerRow);
     cursorY += totalRows * (cardHeight + cardGap) + 8;
   }
 
-  // Render Details / Table if present
-  if (data.details && data.details.length > 0) {
+  // Render Details / Table if present (filtered for genuine financial content)
+  const validDetails = (data.details || []).filter(
+    (d) => !isConversationalFiller(d.key) && !isConversationalFiller(d.value)
+  );
+
+  if (validDetails.length > 0) {
     if (cursorY > pageHeight - 60) {
       doc.addPage();
-      cursorY = 20;
+      cursorY = 22;
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
+    doc.setFont("times", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(51, 65, 85);
     doc.text("TRANSACTION & AUDIT BREAKDOWN", margin, cursorY);
     cursorY += 5;
 
     doc.setFillColor(241, 245, 249);
     doc.rect(margin, cursorY, contentWidth, 7, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
+    doc.setFont("times", "bold");
+    doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
     doc.text("METRIC / PARAMETER", margin + 4, cursorY + 5);
     doc.text("VERIFIED VALUE", margin + contentWidth / 2, cursorY + 5);
     cursorY += 8;
 
-    data.details.forEach((d, idx) => {
+    validDetails.forEach((d, idx) => {
       if (cursorY > pageHeight - 30) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = 22;
       }
       if (idx % 2 === 1) {
         doc.setFillColor(248, 250, 252);
         doc.rect(margin, cursorY - 1, contentWidth, 7, "F");
       }
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
+      doc.setFont("times", "normal");
+      doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
-      doc.text(d.key, margin + 4, cursorY + 4);
+      doc.text(sanitizePdfText(d.key), margin + 4, cursorY + 4);
 
-      doc.setFont("helvetica", "bold");
+      doc.setFont("times", "bold");
       doc.setTextColor(15, 23, 42);
-      doc.text(d.value, margin + contentWidth / 2, cursorY + 4);
+      doc.text(sanitizePdfText(d.value), margin + contentWidth / 2, cursorY + 4);
       cursorY += 7;
     });
 
@@ -306,12 +415,12 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
   if (data.tableData && data.tableData.length > 0) {
     if (cursorY > pageHeight - 60) {
       doc.addPage();
-      cursorY = 20;
+      cursorY = 22;
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
+    doc.setFont("times", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(51, 65, 85);
     doc.text("LEDGER RECORDS", margin, cursorY);
     cursorY += 5;
 
@@ -321,28 +430,28 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
     // Table Header
     doc.setFillColor(15, 23, 42);
     doc.rect(margin, cursorY, contentWidth, 7, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.5);
+    doc.setFont("times", "bold");
+    doc.setFontSize(8);
     doc.setTextColor(255, 255, 255);
     headers.forEach((h, hIdx) => {
-      doc.text(h.toUpperCase(), margin + hIdx * colWidth + 3, cursorY + 5);
+      doc.text(sanitizePdfText(h).toUpperCase(), margin + hIdx * colWidth + 3, cursorY + 5);
     });
     cursorY += 8;
 
     data.tableData.forEach((row, rIdx) => {
       if (cursorY > pageHeight - 30) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = 22;
       }
       if (rIdx % 2 === 1) {
         doc.setFillColor(248, 250, 252);
         doc.rect(margin, cursorY - 1, contentWidth, 6.5, "F");
       }
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.5);
+      doc.setFont("times", "normal");
+      doc.setFontSize(8);
       doc.setTextColor(51, 65, 85);
       headers.forEach((h, hIdx) => {
-        const valStr = String(row[h] ?? "");
+        const valStr = sanitizePdfText(String(row[h] ?? ""));
         doc.text(valStr.slice(0, 28), margin + hIdx * colWidth + 3, cursorY + 4);
       });
       cursorY += 6.5;
@@ -351,32 +460,35 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
     cursorY += 6;
   }
 
-  // Render Key Takeaways
-  if (data.takeaways && data.takeaways.length > 0) {
+  // Render Key Takeaways (sanitized and filtered)
+  const validTakeaways = (data.takeaways || []).filter((t) => !isConversationalFiller(t));
+
+  if (validTakeaways.length > 0) {
     if (cursorY > pageHeight - 50) {
       doc.addPage();
-      cursorY = 20;
+      cursorY = 22;
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
+    doc.setFont("times", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(51, 65, 85);
     doc.text("EXECUTIVE TAKEAWAYS & INSIGHTS", margin, cursorY);
     cursorY += 5;
 
-    data.takeaways.forEach((t) => {
+    validTakeaways.forEach((t) => {
       if (cursorY > pageHeight - 25) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = 22;
       }
       doc.setFillColor(0, 112, 186);
       doc.circle(margin + 2, cursorY + 1.5, 1, "F");
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
+      doc.setFont("times", "normal");
+      doc.setFontSize(9);
       doc.setTextColor(51, 65, 85);
 
-      const splitText = doc.splitTextToSize(t, contentWidth - 8);
+      const safeText = sanitizePdfText(t);
+      const splitText = doc.splitTextToSize(safeText, contentWidth - 8);
       doc.text(splitText, margin + 6, cursorY + 2.5);
       cursorY += splitText.length * 4.5 + 2;
     });
@@ -385,55 +497,59 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
   }
 
   // Render Recommendations
-  if (data.recommendations && data.recommendations.length > 0) {
+  const validRecs = (data.recommendations || []).filter((r) => !isConversationalFiller(r));
+
+  if (validRecs.length > 0) {
     if (cursorY > pageHeight - 40) {
       doc.addPage();
-      cursorY = 20;
+      cursorY = 22;
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
+    doc.setFont("times", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(51, 65, 85);
     doc.text("STRATEGIC RECOMMENDATIONS", margin, cursorY);
     cursorY += 5;
 
-    data.recommendations.forEach((rec, idx) => {
+    validRecs.forEach((rec, idx) => {
       if (cursorY > pageHeight - 25) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = 22;
       }
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
+      doc.setFont("times", "bold");
+      doc.setFontSize(9);
       doc.setTextColor(0, 112, 186);
       doc.text(`${idx + 1}.`, margin + 2, cursorY + 2.5);
 
-      doc.setFont("helvetica", "normal");
+      doc.setFont("times", "normal");
       doc.setTextColor(51, 65, 85);
-      const splitText = doc.splitTextToSize(rec, contentWidth - 10);
+      const safeRec = sanitizePdfText(rec);
+      const splitText = doc.splitTextToSize(safeRec, contentWidth - 10);
       doc.text(splitText, margin + 8, cursorY + 2.5);
       cursorY += splitText.length * 4.5 + 2;
     });
   }
 
-  // Footer on all pages
+  // Footer on all pages (Times New Roman)
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
     doc.setDrawColor(226, 232, 240);
     doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
+    doc.setFont("times", "italic");
+    doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
     doc.text(
       "PayPilot AI  •  PayPal Developer Sandbox Live Verified  •  Confidential Merchant Record",
       margin,
       pageHeight - 7
     );
+    doc.setFont("times", "normal");
     doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 7, { align: "right" });
   }
 
-  const cleanFilename = (filename || `${data.title.replace(/[^a-zA-Z0-9_-]/g, "_")}`).slice(0, 60) + ".pdf";
+  const cleanFilename = (filename || `${cleanTitle.replace(/[^a-zA-Z0-9_-]/g, "_")}`).slice(0, 60) + ".pdf";
   doc.save(cleanFilename);
 }
 
@@ -443,11 +559,13 @@ export function exportToPdf(data: FinancialReportData, filename?: string): void 
 export function exportToExcel(data: FinancialReportData, filename?: string): void {
   const wb = XLSX.utils.book_new();
 
+  const cleanTitle = sanitizePdfText(data.title) || "Executive Financial Summary";
+
   // Sheet 1: Executive Summary
   const summaryAoa: any[][] = [
     ["PAYPILOT AI - EXECUTIVE FINANCIAL REPORT"],
     ["Platform:", "PayPal Developer Sandbox Verified", "Report Date:", new Date().toISOString()],
-    ["Report Title:", data.title],
+    ["Report Title:", cleanTitle],
     ["Environment:", "PayPal Sandbox Live (Orders v2 & REST Captures)"],
     [],
     ["KEY FINANCIAL METRICS"],
@@ -456,7 +574,7 @@ export function exportToExcel(data: FinancialReportData, filename?: string): voi
 
   if (data.metrics && data.metrics.length > 0) {
     data.metrics.forEach((m) => {
-      summaryAoa.push([m.label, m.value, "Verified by PayPal Platform"]);
+      summaryAoa.push([sanitizePdfText(m.label), sanitizePdfText(m.value), "Verified by PayPal Platform"]);
     });
   } else {
     summaryAoa.push(["Gross Captured Volume", "$4,193.00", "Verified"]);
@@ -464,28 +582,34 @@ export function exportToExcel(data: FinancialReportData, filename?: string): voi
     summaryAoa.push(["Net Settled Revenue", "$3,210.00", "Verified"]);
   }
 
-  if (data.details && data.details.length > 0) {
+  const validDetails = (data.details || []).filter(
+    (d) => !isConversationalFiller(d.key) && !isConversationalFiller(d.value)
+  );
+
+  if (validDetails.length > 0) {
     summaryAoa.push([]);
     summaryAoa.push(["DETAILED AUDIT BREAKDOWN"]);
     summaryAoa.push(["Parameter", "Value"]);
-    data.details.forEach((d) => {
-      summaryAoa.push([d.key, d.value]);
+    validDetails.forEach((d) => {
+      summaryAoa.push([sanitizePdfText(d.key), sanitizePdfText(d.value)]);
     });
   }
 
-  if (data.takeaways && data.takeaways.length > 0) {
+  const validTakeaways = (data.takeaways || []).filter((t) => !isConversationalFiller(t));
+  if (validTakeaways.length > 0) {
     summaryAoa.push([]);
     summaryAoa.push(["AI EXECUTIVE TAKEAWAYS"]);
-    data.takeaways.forEach((t) => {
-      summaryAoa.push([t]);
+    validTakeaways.forEach((t) => {
+      summaryAoa.push([sanitizePdfText(t)]);
     });
   }
 
-  if (data.recommendations && data.recommendations.length > 0) {
+  const validRecs = (data.recommendations || []).filter((r) => !isConversationalFiller(r));
+  if (validRecs.length > 0) {
     summaryAoa.push([]);
     summaryAoa.push(["STRATEGIC RECOMMENDATIONS"]);
-    data.recommendations.forEach((r, idx) => {
-      summaryAoa.push([`${idx + 1}. ${r}`]);
+    validRecs.forEach((r, idx) => {
+      summaryAoa.push([`${idx + 1}. ${sanitizePdfText(r)}`]);
     });
   }
 
@@ -499,7 +623,7 @@ export function exportToExcel(data: FinancialReportData, filename?: string): voi
     XLSX.utils.book_append_sheet(wb, wsTable, "Ledger Transactions");
   }
 
-  const cleanFilename = (filename || `${data.title.replace(/[^a-zA-Z0-9_-]/g, "_")}`).slice(0, 60) + ".xlsx";
+  const cleanFilename = (filename || `${cleanTitle.replace(/[^a-zA-Z0-9_-]/g, "_")}`).slice(0, 60) + ".xlsx";
   XLSX.writeFile(wb, cleanFilename);
 }
 
@@ -508,6 +632,7 @@ export function exportToExcel(data: FinancialReportData, filename?: string): voi
  */
 export function exportToCsv(data: FinancialReportData, filename?: string): void {
   const rows: any[] = [];
+  const cleanTitle = sanitizePdfText(data.title) || "Executive Financial Summary";
 
   if (data.tableData && data.tableData.length > 0) {
     data.tableData.forEach((row) => rows.push(row));
@@ -515,21 +640,22 @@ export function exportToCsv(data: FinancialReportData, filename?: string): void 
     data.metrics.forEach((m) => {
       rows.push({
         Section: "Key Metric",
-        Parameter: m.label,
-        Value: m.value,
+        Parameter: sanitizePdfText(m.label),
+        Value: sanitizePdfText(m.value),
         Verified: "PayPal Sandbox",
       });
     });
-    if (data.details) {
-      data.details.forEach((d) => {
-        rows.push({
-          Section: "Detail",
-          Parameter: d.key,
-          Value: d.value,
-          Verified: "PayPal Sandbox",
-        });
+    const validDetails = (data.details || []).filter(
+      (d) => !isConversationalFiller(d.key) && !isConversationalFiller(d.value)
+    );
+    validDetails.forEach((d) => {
+      rows.push({
+        Section: "Detail",
+        Parameter: sanitizePdfText(d.key),
+        Value: sanitizePdfText(d.value),
+        Verified: "PayPal Sandbox",
       });
-    }
+    });
   }
 
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -539,7 +665,7 @@ export function exportToCsv(data: FinancialReportData, filename?: string): void 
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  const cleanFilename = (filename || `${data.title.replace(/[^a-zA-Z0-9_-]/g, "_")}`).slice(0, 60) + ".csv";
+  const cleanFilename = (filename || `${cleanTitle.replace(/[^a-zA-Z0-9_-]/g, "_")}`).slice(0, 60) + ".csv";
   link.setAttribute("download", cleanFilename);
   document.body.appendChild(link);
   link.click();
