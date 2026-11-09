@@ -86,16 +86,16 @@ export const AI_TOOL_DEFINITIONS = [
     type: "function" as const,
     function: {
       name: "create_paypal_order",
-      description: "Generate a direct PayPal checkout order for ad-hoc terminal transactions. DO NOT use this for invoices; for invoices use create_invoice.",
+      description: "Generate a direct PayPal sandbox checkout order for instant payment / terminal transactions. Does NOT create an invoice in Smart Collections.",
       parameters: {
         type: "object",
         properties: {
-          amount: { type: "number", description: "Transaction amount in USD (must be greater than 0)" },
-          description: { type: "string", description: "Direct checkout payment description / memo" },
+          amount: { type: "number", description: "Transaction amount in USD (must be greater than 0, e.g. 200)" },
+          description: { type: "string", description: "Checkout memo or description (e.g. 'Sandbox Checkout $200')" },
           customerEmail: { type: "string", description: "Customer email address to associate" },
           currency: { type: "string", default: "USD", description: "Currency code (default: USD)" },
         },
-        required: ["amount", "description"],
+        required: ["amount"],
       },
     },
   },
@@ -492,67 +492,15 @@ export async function executeAITool(
         },
       });
 
-      // If this order specifies a client or invoice memo, also register an Invoice so it appears in Smart Collections!
-      let createdInvoice = null;
-      const descText = args.description || "";
-      const lowerDesc = descText.toLowerCase();
-      const isInvoiceOrder =
-        lowerDesc.includes("invoice") ||
-        lowerDesc.includes("bill") ||
-        lowerDesc.includes("acme") ||
-        lowerDesc.includes("test") ||
-        (!lowerDesc.includes("direct") && !lowerDesc.includes("paypilot") && descText.length > 0);
-
-      if (isInvoiceOrder) {
-        let customer = await prisma.customer.findFirst({
-          where: {
-            merchantId,
-            OR: [
-              { name: { contains: descText } },
-              { company: { contains: descText } },
-            ],
-          },
-        });
-        if (!customer) {
-          customer = await prisma.customer.create({
-            data: {
-              merchantId,
-              name: descText,
-              email: `${descText.toLowerCase().replace(/[^a-z0-9]/g, "") || "client"}@example.com`,
-              company: `${descText} Corp`,
-            },
-          });
-        }
-        const count = await prisma.invoice.count({ where: { merchantId } });
-        const invoiceNumber = `INV-2026-${String(count + 1).padStart(3, "0")}`;
-        createdInvoice = await prisma.invoice.create({
-          data: {
-            merchantId,
-            customerId: customer.id,
-            invoiceNumber,
-            amount,
-            currency: args.currency || "USD",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            status: "UNPAID",
-            itemsSummary: descText || `Invoice for ${customer.name}`,
-            paypalInvoiceId: order.id,
-            paymentLink: order.approveLink || order.links?.find((l: any) => l.rel === "approve")?.href || null,
-          },
-        });
-      }
-
       return {
         success: true,
         paypalOrderId: order.id,
         paymentId: payment.id,
-        invoiceNumber: createdInvoice?.invoiceNumber || null,
-        invoiceId: createdInvoice?.id || null,
         amount,
+        currency: args.currency || "USD",
         status: "CREATED",
         approvalUrl: order.links?.find((l: any) => l.rel === "approve")?.href || order.approveLink,
-        instructions: createdInvoice
-          ? `Invoice ${createdInvoice.invoiceNumber} created in Smart Collections. Client must approve via PayPal Checkout.`
-          : "Client must approve order via PayPal Checkout before capture.",
+        instructions: "Client can complete payment immediately via the verified PayPal Sandbox Checkout portal.",
       };
     }
 

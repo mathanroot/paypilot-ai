@@ -45,7 +45,8 @@ Your core mission:
 3. For sensitive operations like executing refunds or capturing high-value transactions, invoke the proper preparation tool. Inform the merchant that the operation has been staged in the Human Approval Center for their explicit authorization.
 4. Provide structured, executive-grade analysis with clear takeaways.
 5. Emphasize PayPal capabilities (Orders v2, Checkout, Captures, Webhooks, Invoicing).
-6. When the merchant asks to create an invoice (e.g. "create new invoice for $50 for Acme"), you MUST invoke the \`create_invoice\` tool so it is officially registered in Smart Collections with an invoice number (INV-2026-xxx) and PayPal payment link. Do NOT call \`create_paypal_order\` for invoice requests.
+6. When the merchant asks to create an invoice (e.g. "create new invoice for $50 for Acme", "bill $80 to Vanguard"), you MUST invoke the \`create_invoice\` tool so it is officially registered in Smart Collections with an invoice number (INV-2026-xxx) and PayPal payment link.
+When the merchant asks to create a checkout or order (e.g. "create a sandbox checkout with 200 dollar", "generate $10 checkout"), invoke \`create_paypal_order\`. Direct checkout orders are for ad-hoc customer checkout and do NOT create invoices or customer profiles in Smart Collections.
 7. When asked about revenue, captured volume, or financial performance for a specific period (e.g. 'today', 'last 7 days', 'last 30 days', 'last 90 days'), pass the exact \`timeRange\` parameter ('today', '7d', '30d', '90d') to the \`get_revenue_summary\` tool so the figures match the merchant's Financial Command Center.
 8. When the merchant explicitly asks for a PDF report, Excel (.xlsx) sheet, or CSV export (e.g., "make a pdf today Gross Captured Volume", "can you make pdf that", "make report with pdf or xls", "export to excel"), invoke the appropriate backend tool (\`get_revenue_summary\` or \`generate_financial_report\`). Present the structured metrics, executive takeaways, and recommendations clearly, and inform them that 1-click download options are ready below. For ordinary non-report questions, provide regular financial insights without export instructions.
 9. NEVER output raw JSON, code blocks (\`\`\`json or \`\`\`), or program code to the merchant. Always translate every tool result, transaction object, or financial record into clean, human-readable natural language with structured bullet points and executive takeaways.`;
@@ -410,10 +411,12 @@ async function executeLocalSemanticRouter(
     return `### 💳 Recent Transactions (PayPal Sandbox)\n\n${txs}\n\nAll captured transactions have verified PayPal settlement IDs recorded in your database ledger.`;
   }
 
-  if (lower.includes("order") && (lower.includes("create") || lower.includes("generate") || lower.includes("make"))) {
-    const res = await executeAITool("create_paypal_order", { amount: 150, description: "Consulting Retainer via AI Assistant" }, { merchantId, actorEmail });
-    executedList.push({ name: "create_paypal_order", args: { amount: 150 }, result: res });
-    return `### ✅ PayPal Sandbox Order Created\n\n- **PayPal Order ID:** \`${res.paypalOrderId}\`\n- **Amount:** $${res.amount} USD\n- **Status:** CREATED\n- **Approval Link:** [Approve in PayPal Sandbox](${res.approvalUrl})\n\nOnce the customer approves the order in PayPal Checkout, it can be captured.`;
+  if ((lower.includes("order") || lower.includes("checkout")) && (lower.includes("create") || lower.includes("generate") || lower.includes("make") || lower.includes("sandbox"))) {
+    const amountMatch = lower.match(/(?:\$|usd\s*|\b)(\d+(?:\.\d+)?)\s*(?:dollar|usd|\b)/i) || lower.match(/\b(\d+(?:\.\d+)?)\b/);
+    const amount = amountMatch ? parseFloat(amountMatch[1]) : 150;
+    const res = await executeAITool("create_paypal_order", { amount, description: `Sandbox Checkout - $${amount} USD` }, { merchantId, actorEmail });
+    executedList.push({ name: "create_paypal_order", args: { amount }, result: res });
+    return `### ✅ PayPal Sandbox Checkout Created ($${res.amount} USD)\n\n- **PayPal Order ID:** \`${res.paypalOrderId}\`\n- **Amount:** $${Number(res.amount).toFixed(2)} USD\n- **Status:** CREATED\n- **Approval Link:** [Approve in PayPal Sandbox](${res.approvalUrl})\n\nThis checkout order is ready for immediate customer payment in PayPal Sandbox.`;
   }
 
   // Default executive report
