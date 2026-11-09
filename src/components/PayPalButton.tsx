@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { loadScript } from "@paypal/paypal-js";
-import { RefreshCw, AlertCircle } from "lucide-react";
+import { RefreshCw, AlertCircle, ShieldCheck } from "lucide-react";
 
 interface PayPalButtonProps {
   clientId: string;
@@ -23,7 +23,21 @@ export default function PayPalButton({
 }: PayPalButtonProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
+  const [isExpanding, setIsExpanding] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+
+  // Keep latest values in refs to avoid re-initializing PayPal Buttons on re-renders
+  const amountRef = useRef(amount);
+  const descriptionRef = useRef(description);
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    amountRef.current = amount;
+    descriptionRef.current = description;
+    onSuccessRef.current = onSuccess;
+    onErrorRef.current = onError;
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -42,11 +56,14 @@ export default function PayPalButton({
     const targetDiv = document.createElement("div");
     container.appendChild(targetDiv);
 
+    // Preload both buttons and card-fields so debit/credit card expands instantly on click
     loadScript({
       clientId,
       currency: currency.toUpperCase(),
       intent: "capture",
-      components: "buttons",
+      components: "buttons,card-fields",
+      enableFunding: "card",
+      commit: true,
     })
       .then((paypal) => {
         if (!isMounted || !paypal || !paypal.Buttons) return;
@@ -66,9 +83,9 @@ export default function PayPalButton({
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
-                    amount: Number(amount),
+                    amount: Number(amountRef.current),
                     currency: currency.toUpperCase(),
-                    description: description || "PayPilot AI Invoice Checkout",
+                    description: descriptionRef.current || "PayPilot AI Invoice Checkout",
                   }),
                 });
 
@@ -78,7 +95,7 @@ export default function PayPalButton({
                 }
                 return data.orderId;
               } catch (err: any) {
-                onError(err.message || "Failed to initialize PayPal order");
+                onErrorRef.current(err.message || "Failed to initialize PayPal order");
                 throw err;
               }
             },
@@ -97,14 +114,14 @@ export default function PayPalButton({
                 if (!res.ok) {
                   throw new Error(captureRes.error || "Capture verification failed");
                 }
-                onSuccess(captureRes);
+                onSuccessRef.current(captureRes);
               } catch (err: any) {
-                onError(err.message || "Payment capture failed");
+                onErrorRef.current(err.message || "Payment capture failed");
               }
             },
             onError: (err: any) => {
               console.error("[PayPal JS SDK Error]:", err);
-              onError(
+              onErrorRef.current(
                 err?.message ||
                   "PayPal Sandbox declined this transaction. Please verify buyer currency compatibility."
               );
@@ -144,24 +161,43 @@ export default function PayPalButton({
         // ignore unmanaged child removal
       }
     };
-  }, [clientId, currency, amount, description, onSuccess, onError]);
+  }, [clientId, currency]);
+
+  const handleContainerClick = () => {
+    // When user clicks the button area, provide instant feedback while card fields expand
+    setIsExpanding(true);
+    setTimeout(() => setIsExpanding(false), 2500);
+  };
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-2">
       {loading && (
         <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-          <RefreshCw className="w-4 h-4 animate-spin text-primary" />
-          <span>Loading PayPal Checkout Buttons ({currency})...</span>
+          <RefreshCw className="w-4 h-4 animate-spin text-accent-cyan" />
+          <span>Pre-loading PayPal &amp; Card Terminal ({currency})...</span>
         </div>
       )}
+
+      {isExpanding && (
+        <div className="p-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 text-xs text-accent-cyan flex items-center justify-center gap-2 transition-all">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          <span className="font-medium">Opening secure card terminal...</span>
+        </div>
+      )}
+
       {initError && (
         <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{initError}</span>
         </div>
       )}
+
       {/* Unmanaged target container: React will never reconcile inside this div */}
-      <div ref={containerRef} className="min-h-[44px]" />
+      <div
+        ref={containerRef}
+        onClick={handleContainerClick}
+        className="min-h-[44px]"
+      />
     </div>
   );
 }

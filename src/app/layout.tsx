@@ -14,6 +14,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <link rel="preconnect" href="https://www.sandbox.paypal.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://www.paypalobjects.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://api-m.sandbox.paypal.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://www.sandbox.paypal.com" />
+        <link rel="dns-prefetch" href="https://www.paypalobjects.com" />
+        <link rel="dns-prefetch" href="https://api-m.sandbox.paypal.com" />
+      </head>
       <body className="bg-background text-slate-100 min-h-screen antialiased selection:bg-primary selection:text-white">
         {children}
       </body>

@@ -47,7 +47,12 @@ function CheckoutContent() {
   const [orderData, setOrderData] = useState<any>(null);
   const [captureData, setCaptureData] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [paypalConfig, setPaypalConfig] = useState<any>(null);
+  const [paypalConfig, setPaypalConfig] = useState<any>(() => ({
+    clientId:
+      process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
+      "AbUR-e_EjMt2SmOy6ZfGYV3rFAkBAecxzT3K2hnNAiSS7cydCfZAMobbTsQWSg5pTEkkk81KgIWg1nYP",
+    environment: "sandbox",
+  }));
   const syncedTokensRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
