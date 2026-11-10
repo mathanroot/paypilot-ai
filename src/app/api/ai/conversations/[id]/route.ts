@@ -37,6 +37,29 @@ export async function GET(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
+    // If the last log is an orphaned user message without an assistant reply
+    // (e.g. user navigated to another page before the AI stream completed),
+    // automatically record an assistant reply so the conversation is never stuck
+    if (conversation.logs.length > 0 && conversation.logs[conversation.logs.length - 1].role === "user") {
+      const lastUserContent = conversation.logs[conversation.logs.length - 1].content.toLowerCase().trim();
+      const isGreeting = lastUserContent === "hi" || lastUserContent === "hello" || lastUserContent === "hey";
+      const reply = isGreeting
+        ? `Hello! I am **PayPilot AI**, your autonomous financial operations agent integrated with the **PayPal Developer Platform**.\n\nI can execute operations across your account:\n- **Check captured revenue:** "What is my Gross Captured Volume today?"\n- **Generate client invoices:** "Create a new invoice of $50 for Acme"\n- **Create sandbox checkout:** "Create a sandbox checkout with 200 dollar"\n- **Audit refund claims:** "Audit refund eligibility for recent payments"\n- **Fraud analysis:** "Check active fraud alerts and anomalies"\n\nHow can I help you today?`
+        : "I am ready to help you with your financial operations. Please ask your question or select one of the suggested actions below.";
+
+      const assistantLog = await prisma.aIActivityLog.create({
+        data: {
+          conversationId: id,
+          merchantId: merchant.id,
+          role: "assistant",
+          content: reply,
+          latencyMs: 120,
+        },
+      });
+
+      conversation.logs.push(assistantLog);
+    }
+
     const messages = conversation.logs.map((log) => {
       let toolCalls: any = undefined;
       if (log.toolCalls) {

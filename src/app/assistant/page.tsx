@@ -119,7 +119,7 @@ export default function AssistantPage() {
   // 1. Fetch conversations list
   const fetchConversations = async () => {
     try {
-      const res = await fetch("/api/ai/conversations");
+      const res = await fetch("/api/ai/conversations", { cache: "no-store" });
       const data = await res.json();
       if (data.conversations && Array.isArray(data.conversations)) {
         setConversations(data.conversations);
@@ -135,7 +135,7 @@ export default function AssistantPage() {
   const loadConversationMessages = async (id: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/ai/conversations/${id}`);
+      const res = await fetch(`/api/ai/conversations/${id}`, { cache: "no-store" });
       const data = await res.json();
       if (data.messages) {
         setMessages([WELCOME_MESSAGE, ...data.messages]);

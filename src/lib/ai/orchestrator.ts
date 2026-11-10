@@ -67,21 +67,37 @@ export async function runAIAgent(params: RunAgentParams): Promise<AgentExecution
     conversationId = conv.id;
   }
 
-  // 2. Fetch conversation history
+  // 2. Fetch conversation history & enforce strictly alternating user/assistant roles
   const pastLogs = await prisma.aIActivityLog.findMany({
     where: { conversationId },
     orderBy: { createdAt: "asc" },
-    take: 10,
+    take: 12,
   });
 
-  const messages: any[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-    ...pastLogs.map((log) => ({
-      role: log.role === "tool" ? "assistant" : log.role,
-      content: log.content,
-    })),
-    { role: "user", content: userMessage },
-  ];
+  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+
+  for (const log of pastLogs) {
+    const role: "user" | "assistant" = log.role === "user" ? "user" : "assistant";
+    const lastMsg = messages[messages.length - 1];
+
+    if (lastMsg && lastMsg.role === role) {
+      lastMsg.content += `\n${log.content}`;
+    } else {
+      messages.push({ role, content: log.content });
+    }
+  }
+
+  // If the last history message was a user message (e.g. from an interrupted session),
+  // insert a bridge assistant message so the new user message doesn't cause a consecutive role 400 error
+  const lastHistoryMsg = messages[messages.length - 1];
+  if (lastHistoryMsg && lastHistoryMsg.role === "user") {
+    messages.push({
+      role: "assistant",
+      content: "I am ready to help you with your financial operations.",
+    });
+  }
+
+  messages.push({ role: "user", content: userMessage });
 
   // 3. Save incoming user message
   await prisma.aIActivityLog.create({
@@ -288,7 +304,21 @@ async function executeLocalSemanticRouter(
   actorEmail: string,
   executedList: Array<{ name: string; args: any; result: any }>
 ): Promise<string> {
-  const lower = message.toLowerCase();
+  const lower = message.toLowerCase().trim();
+
+  // 1. Direct conversational greetings
+  if (
+    lower === "hi" ||
+    lower === "hello" ||
+    lower === "hey" ||
+    lower === "hi!" ||
+    lower === "hello!" ||
+    lower.startsWith("hi ") ||
+    lower.startsWith("hello ") ||
+    lower.startsWith("hey ")
+  ) {
+    return `Hello! I am **PayPilot AI**, your autonomous financial operations agent integrated with the **PayPal Developer Platform**.\n\nI can execute operations across your account:\n- **Check captured revenue:** "What is my Gross Captured Volume today?"\n- **Generate client invoices:** "Create a new invoice of $50 for Acme"\n- **Create sandbox checkout:** "Create a sandbox checkout with 200 dollar"\n- **Audit refund claims:** "Audit refund eligibility for recent payments"\n- **Fraud analysis:** "Check active fraud alerts and anomalies"\n\nHow can I help you today?`;
+  }
 
   if (
     lower.includes("revenue") ||

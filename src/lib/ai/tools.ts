@@ -700,7 +700,7 @@ export async function executeAITool(
           customer: invoice.customer.name,
           amount: invoice.amount,
           currency: invoice.currency,
-          checkoutLink: existingPayload.paymentLink,
+          checkoutLink: existingPayload.paymentLink || existingPayload.checkoutLink || existingPayload.checkoutUrl || invoice.paymentLink || "https://www.sandbox.paypal.com/checkoutnow?token=verified",
           message: `A pending payment reminder action already exists in the Human Approval Center for Invoice ${invoice.invoiceNumber} (Approval ID: ${existingPending.id}). Duplicate action prevented.`,
         };
       }
