@@ -6,14 +6,13 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log("🚀 Starting PayPilot AI Autonomous Financial Sweep...");
-  const merchant = await prisma.merchant.findFirst();
+  const merchant = await prisma.merchantAccount.findFirst();
   if (!merchant) {
-    console.error("No merchant found in ledger.");
+    console.error("No merchant account found in ledger.");
     process.exit(1);
   }
 
   const { runAutonomousFinancialSweep } = await import("../src/lib/ai/sweep.js").catch(() => {
-    // In ts/esm environment, fall back to direct sweep execution
     return { runAutonomousFinancialSweep: null };
   });
 
@@ -21,7 +20,7 @@ async function main() {
     const sweep = await runAutonomousFinancialSweep(merchant.id, "cron@paypilot.ai");
     console.log("Sweep Completed Successfully:\n", sweep.briefing);
   } else {
-    console.log("Sweeping merchant:", merchant.id, merchant.name);
+    console.log("Sweeping merchant:", merchant.id, merchant.businessName);
     const overdueCount = await prisma.invoice.count({
       where: { merchantId: merchant.id, status: "OVERDUE" },
     });
