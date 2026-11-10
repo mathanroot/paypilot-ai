@@ -263,7 +263,7 @@ async function main() {
       paypalCaptureId: "CAP-11928374",
       amount: 450.0,
       currency: "USD",
-      status: "COMPLETED",
+      status: "PARTIALLY_REFUNDED",
       paymentMethod: "PAYPAL",
       description: "AI Smart Collection Agent Addon",
       riskScore: 12,
@@ -272,6 +272,20 @@ async function main() {
         create: [
           { eventType: "ORDER_CREATED", status: "CREATED" },
           { eventType: "CAPTURE_COMPLETED", status: "COMPLETED" },
+          { eventType: "PARTIAL_REFUND_COMPLETED", status: "PARTIALLY_REFUNDED" },
+        ],
+      },
+      refunds: {
+        create: [
+          {
+            merchantId: merchant.id,
+            paypalRefundId: "REF-6629104C-100",
+            amount: 100.0,
+            currency: "USD",
+            reason: "Customer requested partial discount adjustment ($100.00 approved)",
+            status: "COMPLETED",
+            approvedBy: user.name,
+          },
         ],
       },
     },
@@ -364,16 +378,57 @@ async function main() {
       merchantId: merchant.id,
       actionType: "EXECUTE_REFUND",
       targetId: pay3.id,
+      title: "Authorize Refund for Order ORD-6629104C ($100.00)",
+      description: "Customer loyalty promotional adjustment approved by merchant.",
+      payload: JSON.stringify({
+        paymentId: pay3.id,
+        captureId: "CAP-11928374",
+        amount: 100.0,
+        currency: "USD",
+        reason: "Customer loyalty promotional adjustment",
+      }),
+      status: "COMPLETED",
+      requestedBy: "AI_REFUND_ASSISTANT",
+      approvedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    },
+  });
+
+  await prisma.approvalRequest.create({
+    data: {
+      merchantId: merchant.id,
+      actionType: "EXECUTE_REFUND",
+      targetId: pay3.id,
+      title: "Authorize Refund for Order ORD-6629104C ($225.00)",
+      description: "Secondary refund request exceeding permitted goodwill limit. Rejected by merchant.",
+      payload: JSON.stringify({
+        paymentId: pay3.id,
+        captureId: "CAP-11928374",
+        amount: 225.0,
+        currency: "USD",
+        reason: "Excessive goodwill refund request",
+      }),
+      status: "REJECTED",
+      requestedBy: "AI_REFUND_ASSISTANT",
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    },
+  });
+
+  await prisma.approvalRequest.create({
+    data: {
+      merchantId: merchant.id,
+      actionType: "EXECUTE_REFUND",
+      targetId: pay3.id,
       title: "Authorize Partial Refund for Order ORD-6629104C ($150.00)",
-      description: "Customer requested partial discount due to promotional voucher code applied retroactively. AI analyzed customer LTV ($3,150) and recommends approval.",
+      description: "Initial promotional voucher request. Declined in favor of custom $100 settlement.",
       payload: JSON.stringify({
         paymentId: pay3.id,
         captureId: "CAP-11928374",
         amount: 150.0,
         currency: "USD",
-        reason: "Customer loyalty promotional adjustment (AI Recommended, Confidence: 92%)",
+        reason: "Initial promotional voucher request",
       }),
-      status: "PENDING",
+      status: "REJECTED",
       requestedBy: "AI_REFUND_ASSISTANT",
       expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
     },

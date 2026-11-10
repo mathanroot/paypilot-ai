@@ -213,11 +213,9 @@ export async function POST(request: Request) {
         let deliveryNotice = "";
 
         if (isEmailConfigured) {
-          // If a real email provider is configured, dispatch here
           emailSentStatus = true;
           deliveryNotice = `Email reminder successfully delivered to ${invoice.customer.email}.`;
         } else {
-          // Do NOT claim email was sent if no email provider is configured
           emailSentStatus = false;
           deliveryNotice = `Reminder approved and recorded. Note: No external email provider is configured in environment (.env). The customer's PayPal checkout link has been verified for manual or direct dispatch.`;
         }
@@ -245,7 +243,7 @@ export async function POST(request: Request) {
           timestamp: new Date().toISOString(),
         };
       } else if (requestItem.actionType === "EXECUTE_REFUND") {
-        // Validate Payment
+        // Validate Payment & calculate accurate remaining refundable balance
         const payment = await prisma.payment.findFirst({
           where: { id: payload.paymentId || requestItem.targetId, merchantId: merchant.id },
         });
@@ -254,14 +252,30 @@ export async function POST(request: Request) {
           throw new Error(`Payment record not found.`);
         }
 
-        if (payment.status === "REFUNDED") {
+        // Calculate total prior refunds from successful (COMPLETED) records ONLY
+        const completedRefunds = await prisma.refund.findMany({
+          where: { paymentId: payment.id, status: "COMPLETED" },
+        });
+        const priorRefundedTotal = completedRefunds.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const originalAmount = Number(payment.amount || 0);
+        const remainingRefundable = Math.max(0, originalAmount - priorRefundedTotal);
+        const requestedAmount = Number(payload.amount || 0);
+
+        if (remainingRefundable <= 0.001) {
           executionResult = {
             action: "EXECUTE_REFUND",
             status: "ALREADY_REFUNDED",
-            message: "Payment is already marked as REFUNDED. Duplicate refund prevented.",
+            message: `Payment #${payment.paypalOrderId} is already fully refunded ($${priorRefundedTotal.toFixed(2)} USD refunded). Duplicate refund prevented.`,
             paymentId: payment.id,
-            amount: payload.amount,
+            original_amount: originalAmount,
+            total_refunded: priorRefundedTotal,
+            remaining_balance: 0,
+            payment_status: "REFUNDED",
           };
+        } else if (requestedAmount > remainingRefundable + 0.001) {
+          throw new Error(
+            `Requested refund amount ($${requestedAmount.toFixed(2)}) exceeds remaining refundable balance ($${remainingRefundable.toFixed(2)}). Original payment: $${originalAmount.toFixed(2)}, Prior refunded: $${priorRefundedTotal.toFixed(2)}.`
+          );
         } else {
           let refundResult: any;
           const targetCaptureId = payload.captureId || payment.paypalCaptureId || "CAP-DEFAULT";
@@ -273,7 +287,7 @@ export async function POST(request: Request) {
           try {
             refundResult = await refundPayPalCapture({
               captureId: targetCaptureId,
-              amount: payload.amount,
+              amount: requestedAmount,
               currency: payload.currency || payment.currency || "USD",
               note: payload.reason || "Approved via PayPilot Human Approval Center",
             });
@@ -319,36 +333,47 @@ export async function POST(request: Request) {
             }
           }
 
-          // Update Payment status to REFUNDED
-          await prisma.payment.update({
-            where: { id: payment.id },
-            data: {
-              status: "REFUNDED",
-              events: {
-                create: {
-                  eventType: "REFUND_COMPLETED",
-                  status: "COMPLETED",
-                  rawPayload: JSON.stringify(refundResult),
-                },
-              },
-            },
-          });
+          const newTotalRefunded = priorRefundedTotal + requestedAmount;
+          const isFullRefund = newTotalRefunded >= originalAmount - 0.001;
+          const nextStatus = isFullRefund ? "REFUNDED" : "PARTIALLY_REFUNDED";
 
           // Record Refund
-          await prisma.refund.create({
+          const recordedRefund = await prisma.refund.create({
             data: {
               paymentId: payment.id,
               merchantId: merchant.id,
               paypalRefundId: refundResult.id,
-              amount: payload.amount,
-              currency: payload.currency || "USD",
+              amount: requestedAmount,
+              currency: payload.currency || payment.currency || "USD",
               reason: payload.reason || "Human approval authorization",
               status: "COMPLETED",
               approvedBy: merchant.user.name,
             },
           });
 
-          executionResult = refundResult;
+          // Update Payment status to REFUNDED or PARTIALLY_REFUNDED
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: nextStatus,
+              events: {
+                create: {
+                  eventType: isFullRefund ? "REFUND_COMPLETED" : "PARTIAL_REFUND_COMPLETED",
+                  status: nextStatus,
+                  rawPayload: JSON.stringify(refundResult),
+                },
+              },
+            },
+          });
+
+          executionResult = {
+            ...refundResult,
+            refundId: recordedRefund.id,
+            original_amount: originalAmount,
+            total_refunded: newTotalRefunded,
+            remaining_balance: Math.max(0, originalAmount - newTotalRefunded),
+            payment_status: nextStatus,
+          };
         }
       } else if (requestItem.actionType === "CAPTURE_PAYMENT") {
         const orderId = payload.orderId;

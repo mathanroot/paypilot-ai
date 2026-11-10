@@ -253,17 +253,23 @@ export default function TransactionsPage() {
           </form>
 
           <div className="flex items-center gap-1.5 p-1 bg-surface-card border border-surface-border rounded-xl w-full sm:w-auto overflow-x-auto">
-            {["ALL", "COMPLETED", "REFUNDED", "CREATED"].map((s) => (
+            {[
+              { id: "ALL", label: "All Statuses" },
+              { id: "COMPLETED", label: "Completed" },
+              { id: "PARTIALLY_REFUNDED", label: "Partially Refunded" },
+              { id: "REFUNDED", label: "Refunded" },
+              { id: "CREATED", label: "Created" },
+            ].map(({ id, label }) => (
               <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
+                key={id}
+                onClick={() => setStatusFilter(id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                  statusFilter === s
+                  statusFilter === id
                     ? "bg-primary text-white"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
-                {s === "ALL" ? "All Statuses" : s}
+                {label}
               </button>
             ))}
           </div>
@@ -308,17 +314,27 @@ export default function TransactionsPage() {
                           {t.description || "Invoice Payment"}
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-white">
-                        ${Number(t.amount).toFixed(2)} {t.currency}
+                      <td className="py-3.5 px-4">
+                        <div className="font-bold text-white">
+                          ${Number(t.original_amount ?? t.amount).toFixed(2)} {t.currency}
+                        </div>
+                        {(t.status === "PARTIALLY_REFUNDED" || ((t.total_refunded || 0) > 0 && (t.total_refunded || 0) < Number(t.original_amount ?? t.amount))) && (
+                          <div className="text-[10px] mt-0.5 space-y-0.5 font-mono">
+                            <div className="text-amber-400 font-medium">Refunded: ${Number(t.total_refunded || 0).toFixed(2)}</div>
+                            <div className="text-emerald-400 font-medium">Remaining: ${Number(t.remaining_balance ?? 0).toFixed(2)}</div>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-4">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                             t.status === "COMPLETED"
                               ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                              : t.status === "PARTIALLY_REFUNDED"
+                              ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
                               : t.status === "REFUNDED"
                               ? "bg-purple-500/15 text-purple-400 border border-purple-500/20"
-                              : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                              : "bg-cyan-500/15 text-cyan-400 border border-cyan-500/20"
                           }`}
                         >
                           {t.status}
@@ -396,16 +412,27 @@ export default function TransactionsPage() {
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900/90 via-[#0C1226]/90 to-slate-900/90 border border-white/10 flex flex-wrap items-center justify-between gap-4 shadow-inner">
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-1">
-                      Settlement Volume
+                      {selectedTx.status === "PARTIALLY_REFUNDED" ? "Original Payment Volume" : "Settlement Volume"}
                     </span>
                     <div className="flex items-baseline gap-2">
                       <span className="text-3xl font-extrabold text-white tracking-tight font-mono">
-                        ${Number(selectedTx.amount).toFixed(2)}
+                        ${Number(selectedTx.original_amount ?? selectedTx.amount).toFixed(2)}
                       </span>
                       <span className="text-sm font-bold text-slate-400 font-mono">
                         {selectedTx.currency || "USD"}
                       </span>
                     </div>
+                    {selectedTx.status === "PARTIALLY_REFUNDED" && (
+                      <div className="mt-1 flex items-center gap-2 text-xs font-mono">
+                        <span className="text-amber-400 font-semibold">
+                          Refunded: ${Number(selectedTx.total_refunded || 0).toFixed(2)}
+                        </span>
+                        <span className="text-slate-500">•</span>
+                        <span className="text-emerald-400 font-semibold">
+                          Remaining: ${Number(selectedTx.remaining_balance ?? (selectedTx.amount - (selectedTx.total_refunded || 0))).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                     <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
                       <span className="text-slate-300 font-medium">{selectedTx.description || "Direct Checkout Payment"}</span>
                       <span>•</span>
@@ -419,23 +446,29 @@ export default function TransactionsPage() {
                       className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 shadow-sm ${
                         selectedTx.status === "COMPLETED"
                           ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                          : selectedTx.status === "PARTIALLY_REFUNDED"
+                          ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
                           : selectedTx.status === "REFUNDED"
                           ? "bg-purple-500/15 text-purple-300 border-purple-500/30"
-                          : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                          : "bg-cyan-500/15 text-cyan-300 border-cyan-500/30"
                       }`}
                     >
                       <span
                         className={`w-2 h-2 rounded-full ${
                           selectedTx.status === "COMPLETED"
                             ? "bg-emerald-400 animate-pulse"
+                            : selectedTx.status === "PARTIALLY_REFUNDED"
+                            ? "bg-amber-400 animate-pulse"
                             : selectedTx.status === "REFUNDED"
                             ? "bg-purple-400"
-                            : "bg-amber-400 animate-ping"
+                            : "bg-cyan-400"
                         }`}
                       />
                       <span className="tracking-wide">
                         {selectedTx.status === "COMPLETED"
                           ? "SETTLED & CAPTURED"
+                          : selectedTx.status === "PARTIALLY_REFUNDED"
+                          ? "PARTIALLY REFUNDED"
                           : selectedTx.status === "REFUNDED"
                           ? "REFUNDED & CLOSED"
                           : "AWAITING CHECKOUT"}
@@ -553,6 +586,84 @@ export default function TransactionsPage() {
                         </p>
                       </div>
                     </div>
+
+                    {/* Financial Reconciliation & Refund Audit Card */}
+                    {(selectedTx.status === "PARTIALLY_REFUNDED" || (selectedTx.total_refunded || 0) > 0 || (selectedTx.refund_history && selectedTx.refund_history.length > 0)) && (
+                      <div className="p-4 rounded-xl bg-[#080D1F] border border-cyan-500/20 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] uppercase font-bold text-cyan-300 tracking-wider flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                            Financial Settlement &amp; Refund Ledger Breakdown
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                            selectedTx.status === "PARTIALLY_REFUNDED"
+                              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                              : selectedTx.status === "REFUNDED"
+                              ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                              : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                          }`}>
+                            {selectedTx.status}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2.5 text-center">
+                          <div className="p-2.5 rounded-lg bg-surface/80 border border-white/5">
+                            <span className="text-[10px] text-slate-400 uppercase font-medium block">Original Payment</span>
+                            <span className="text-sm font-bold text-white font-mono">
+                              ${Number(selectedTx.original_amount ?? selectedTx.amount).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="p-2.5 rounded-lg bg-surface/80 border border-white/5">
+                            <span className="text-[10px] text-amber-400 uppercase font-medium block">Total Refunded</span>
+                            <span className="text-sm font-bold text-amber-400 font-mono">
+                              ${Number(selectedTx.total_refunded || 0).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="p-2.5 rounded-lg bg-surface/80 border border-white/5">
+                            <span className="text-[10px] text-emerald-400 uppercase font-medium block">Remaining Balance</span>
+                            <span className="text-sm font-bold text-emerald-400 font-mono">
+                              ${Number(selectedTx.remaining_balance ?? (selectedTx.amount - (selectedTx.total_refunded || 0))).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {selectedTx.refund_history && selectedTx.refund_history.length > 0 && (
+                          <div className="pt-2 border-t border-white/5">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1.5">
+                              Refund Attempt History (Audit Log)
+                            </span>
+                            <div className="space-y-1.5">
+                              {selectedTx.refund_history.map((h: any, idx: number) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between p-2 rounded-lg bg-black/40 border border-white/5 text-[11px]"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                        h.status === "COMPLETED"
+                                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                          : h.status === "REJECTED"
+                                          ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                          : "bg-slate-500/20 text-slate-300"
+                                      }`}
+                                    >
+                                      {h.status}
+                                    </span>
+                                    <span className="font-mono text-white font-semibold">
+                                      ${Number(h.amount).toFixed(2)} USD
+                                    </span>
+                                  </div>
+                                  <div className="text-slate-400 text-[10px]">
+                                    {h.reason || (h.status === "COMPLETED" ? "Successful Refund Settlement" : "Rejected by Merchant")}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* FinTech Ledger Specification Grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -777,17 +888,21 @@ Date: ${new Date(selectedTx.createdAt).toLocaleString()}`,
                     </button>
                   )}
 
-                  {selectedTx.status === "COMPLETED" && selectedTx.paypalCaptureId && (
-                    <Link
-                      href={`/refunds?paymentId=${selectedTx.id}`}
-                      className="px-4 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:bg-rose-500/30 text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-lg shadow-rose-500/10"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Initiate Refund Request</span>
-                    </Link>
-                  )}
+                  {(selectedTx.status === "COMPLETED" || selectedTx.status === "PARTIALLY_REFUNDED") &&
+                    selectedTx.paypalCaptureId &&
+                    (Number(selectedTx.remaining_balance ?? selectedTx.amount) > 0.01) && (
+                      <Link
+                        href={`/refunds?paymentId=${selectedTx.id}`}
+                        className="px-4 py-2 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:bg-rose-500/30 text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-lg shadow-rose-500/10"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>
+                          Initiate Refund (${Number(selectedTx.remaining_balance ?? selectedTx.amount).toFixed(2)} Available)
+                        </span>
+                      </Link>
+                    )}
 
-                  {selectedTx.status === "REFUNDED" && (
+                  {(selectedTx.status === "REFUNDED" || (selectedTx.status === "PARTIALLY_REFUNDED" && Number(selectedTx.remaining_balance ?? 0) <= 0.01)) && (
                     <span className="px-3 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 text-xs font-medium flex items-center gap-1.5">
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>Refund Settled</span>

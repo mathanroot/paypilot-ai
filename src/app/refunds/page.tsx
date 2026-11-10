@@ -75,15 +75,23 @@ function RefundsContent() {
     }
   };
 
-  // Fetch Completed Payments with immediate URL and cache-busting sync
+  // Fetch Eligible Payments (COMPLETED or PARTIALLY_REFUNDED with remaining balance)
   const fetchCompletedPayments = async (explicitTargetId?: string) => {
     try {
-      const res = await fetch(`/api/transactions?status=COMPLETED&t=${Date.now()}`, {
+      const res = await fetch(`/api/transactions?t=${Date.now()}`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
       });
       const data = await res.json();
-      const txs = data.transactions || [];
+      const allTxs: any[] = data.transactions || [];
+
+      // Filter eligible payments: settled PayPal captures with remaining balance available
+      const txs = allTxs.filter(
+        (t: any) =>
+          (t.status === "COMPLETED" || t.status === "PARTIALLY_REFUNDED") &&
+          Number(t.remaining_balance ?? t.amount) > 0.01 &&
+          Boolean(t.paypalCaptureId)
+      );
       setPayments(txs);
 
       if (txs.length > 0) {
@@ -94,24 +102,25 @@ function RefundsContent() {
 
         if (matchingUrlTarget) {
           setSelectedPaymentId(matchingUrlTarget.id);
-          setRefundAmount(String(matchingUrlTarget.amount));
-          saveFormToSession(matchingUrlTarget.id, String(matchingUrlTarget.amount), reason);
+          const defaultAmt = String(matchingUrlTarget.remaining_balance ?? matchingUrlTarget.amount);
+          setRefundAmount(defaultAmt);
+          saveFormToSession(matchingUrlTarget.id, defaultAmt, reason);
           setIneligibleNotice(null);
         } else {
-          // If queryId was specified but not found in COMPLETED txs, check if it exists in another state (e.g. CREATED)
+          // If queryId was specified but not found in eligible txs, check if it exists in another state (e.g. CREATED or fully REFUNDED)
           if (queryId) {
-            fetch(`/api/transactions?t=${Date.now()}`, { cache: "no-store" })
-              .then((r) => r.json())
-              .then((d) => {
-                const allTxs: any[] = d.transactions || [];
-                const found = allTxs.find((t: any) => t.id === queryId || t.paypalOrderId === queryId);
-                if (found && found.status !== "COMPLETED") {
-                  setIneligibleNotice(
-                    `Order #${found.paypalOrderId} is in "${found.status}" status (Capture ID: Pending) and cannot be refunded. Only COMPLETED payments with settled PayPal captures can be refunded. Displaying your eligible completed transactions below.`
-                  );
-                }
-              })
-              .catch(() => {});
+            const found = allTxs.find((t: any) => t.id === queryId || t.paypalOrderId === queryId);
+            if (found) {
+              if (found.status === "REFUNDED" || Number(found.remaining_balance ?? 0) <= 0.01) {
+                setIneligibleNotice(
+                  `Order #${found.paypalOrderId} has already been fully refunded ($${Number(found.total_refunded ?? found.amount).toFixed(2)} USD refunded). No balance remains available for refund. Displaying eligible payments below.`
+                );
+              } else if (found.status === "CREATED") {
+                setIneligibleNotice(
+                  `Order #${found.paypalOrderId} is in "${found.status}" status (Capture ID: Pending) and cannot be refunded. Only payments with settled PayPal captures can be refunded. Displaying your eligible transactions below.`
+                );
+              }
+            }
           }
 
           // If no URL target, check if current selection or saved form ID is in txs
@@ -123,18 +132,19 @@ function RefundsContent() {
           if (matchingPayment) {
             setSelectedPaymentId(matchingPayment.id);
             if (!refundAmount) {
-              setRefundAmount(String(matchingPayment.amount));
+              setRefundAmount(String(matchingPayment.remaining_balance ?? matchingPayment.amount));
             }
           } else {
-            // Fallback to first available completed payment
+            // Fallback to first available eligible payment
             setSelectedPaymentId(txs[0].id);
-            setRefundAmount(String(txs[0].amount));
-            saveFormToSession(txs[0].id, String(txs[0].amount), reason);
+            const defaultAmt = String(txs[0].remaining_balance ?? txs[0].amount);
+            setRefundAmount(defaultAmt);
+            saveFormToSession(txs[0].id, defaultAmt, reason);
           }
         }
       }
     } catch (err) {
-      console.error("Failed to load completed payments", err);
+      console.error("Failed to load eligible payments", err);
     } finally {
       setLoading(false);
     }
@@ -251,7 +261,7 @@ function RefundsContent() {
   const handleSelectPayment = (paymentId: string) => {
     setSelectedPaymentId(paymentId);
     const p = payments.find((x) => x.id === paymentId);
-    const newAmount = p ? String(p.amount) : "";
+    const newAmount = p ? String(p.remaining_balance ?? p.amount) : "";
     setRefundAmount(newAmount);
     setAiAnalysisResult(null);
     setSuccessNotice(null);
@@ -325,6 +335,11 @@ function RefundsContent() {
       const amtNum = parseFloat(refundAmount);
       if (isNaN(amtNum) || amtNum <= 0) {
         throw new Error("Please enter a valid positive refund amount.");
+      }
+      if (selectedPayment && amtNum > Number(selectedPayment.remaining_balance ?? selectedPayment.amount) + 0.001) {
+        throw new Error(
+          `Refund amount ($${amtNum.toFixed(2)}) exceeds maximum remaining balance of $${Number(selectedPayment.remaining_balance ?? selectedPayment.amount).toFixed(2)} USD.`
+        );
       }
 
       const res = await fetch("/api/refunds/stage", {
@@ -440,11 +455,38 @@ function RefundsContent() {
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-white">Refund Request Evaluation</h3>
               {selectedPayment && (
-                <span className="text-[11px] font-mono text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded">
+                <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
+                  selectedPayment.status === "PARTIALLY_REFUNDED"
+                    ? "text-amber-300 bg-amber-500/10 border-amber-500/30"
+                    : "text-emerald-300 bg-emerald-500/10 border-emerald-500/30"
+                }`}>
                   Status: {selectedPayment.status}
                 </span>
               )}
             </div>
+
+            {selectedPayment && (
+              <div className="p-3 rounded-xl bg-[#080D1F] border border-white/5 grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-semibold block">Original Payment</span>
+                  <span className="font-mono font-bold text-white">
+                    ${Number(selectedPayment.original_amount ?? selectedPayment.amount).toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-amber-400 uppercase font-semibold block">Prior Refunded</span>
+                  <span className="font-mono font-bold text-amber-400">
+                    ${Number(selectedPayment.total_refunded || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-emerald-400 uppercase font-semibold block">Available to Refund</span>
+                  <span className="font-mono font-bold text-emerald-400">
+                    ${Number(selectedPayment.remaining_balance ?? (selectedPayment.amount - (selectedPayment.total_refunded || 0))).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3 text-xs">
               <div>
@@ -454,11 +496,16 @@ function RefundsContent() {
                   onChange={(e) => handleSelectPayment(e.target.value)}
                   className="w-full mt-1 px-3 py-2.5 rounded-lg bg-[#0A0F1D] border border-surface-border text-slate-200 focus:outline-none focus:border-primary transition"
                 >
-                  {payments.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.paypalOrderId} — ${p.amount} USD ({p.customer?.name || "Direct Checkout"})
-                    </option>
-                  ))}
+                  {payments.map((p) => {
+                    const remaining = Number(p.remaining_balance ?? p.amount);
+                    const original = Number(p.original_amount ?? p.amount);
+                    const isPartial = p.status === "PARTIALLY_REFUNDED" || remaining < original - 0.01;
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.paypalOrderId} — ${remaining.toFixed(2)} USD available {isPartial ? `(of $${original.toFixed(2)})` : ""} — {p.customer?.name || "Direct Checkout"}{isPartial ? " [PARTIAL]" : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -468,10 +515,10 @@ function RefundsContent() {
                   {selectedPayment && (
                     <button
                       type="button"
-                      onClick={() => handleAmountChange(String(selectedPayment.amount))}
+                      onClick={() => handleAmountChange(String(selectedPayment.remaining_balance ?? selectedPayment.amount))}
                       className="text-[11px] text-accent-cyan hover:underline font-mono"
                     >
-                      Captured Total: ${selectedPayment.amount} USD (Click to fill)
+                      Available: ${Number(selectedPayment.remaining_balance ?? selectedPayment.amount).toFixed(2)} USD (Click to fill)
                     </button>
                   )}
                 </div>
@@ -480,8 +527,40 @@ function RefundsContent() {
                   step="0.01"
                   value={refundAmount}
                   onChange={(e) => handleAmountChange(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border border-surface-border text-white focus:outline-none focus:border-primary transition font-mono"
+                  className={`w-full mt-1 px-3 py-2 rounded-lg bg-[#0A0F1D] border text-white focus:outline-none transition font-mono ${
+                    selectedPayment && parseFloat(refundAmount) > Number(selectedPayment.remaining_balance ?? selectedPayment.amount)
+                      ? "border-rose-500 focus:border-rose-500 text-rose-300"
+                      : "border-surface-border focus:border-primary"
+                  }`}
                 />
+
+                {/* Live Capture & Balance Overdraft Validation Warning */}
+                {selectedPayment && (() => {
+                  const amtNum = parseFloat(refundAmount);
+                  const maxAvail = Number(selectedPayment.remaining_balance ?? selectedPayment.amount);
+                  const origPaid = Number(selectedPayment.original_amount ?? selectedPayment.amount);
+                  if (amtNum > origPaid) {
+                    return (
+                      <div className="mt-2 p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2 animate-in fade-in">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                        <span>
+                          <strong>Capture Overdraft Warning:</strong> Refund amount (${amtNum.toFixed(2)}) exceeds original paid settlement volume (${origPaid.toFixed(2)} USD). Live PayPal capture rules strictly forbid negative capture balances.
+                        </span>
+                      </div>
+                    );
+                  }
+                  if (amtNum > maxAvail) {
+                    return (
+                      <div className="mt-2 p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2 animate-in fade-in">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                        <span>
+                          <strong>Refund Limit Warning:</strong> Refund amount (${amtNum.toFixed(2)}) exceeds remaining available balance ($${maxAvail.toFixed(2)} USD available of $${origPaid.toFixed(2)} original payment).
+                        </span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               <div>
@@ -497,7 +576,13 @@ function RefundsContent() {
               <div className="pt-2 flex items-center gap-3">
                 <button
                   onClick={handleAIAnalyze}
-                  disabled={analyzing || !selectedPaymentId}
+                  disabled={
+                    analyzing ||
+                    !selectedPaymentId ||
+                    !refundAmount ||
+                    parseFloat(refundAmount) <= 0 ||
+                    (selectedPayment && parseFloat(refundAmount) > Number(selectedPayment.remaining_balance ?? selectedPayment.amount))
+                  }
                   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary-hover hover:to-indigo-700 text-white font-semibold text-xs shadow-md shadow-primary/25 transition-all flex items-center gap-2 disabled:opacity-50"
                 >
                   {analyzing ? (

@@ -215,22 +215,92 @@ export async function executeAITool(
         where,
         take: limit,
         orderBy: { createdAt: "desc" },
-        include: { customer: true },
+        include: { customer: true, refunds: true },
       });
-      return {
-        count: transactions.length,
-        transactions: transactions.map((t) => ({
+
+      const paymentIds = transactions.map((t) => t.id);
+      const refundApprovals = await prisma.approvalRequest.findMany({
+        where: {
+          merchantId,
+          actionType: "EXECUTE_REFUND",
+          targetId: { in: paymentIds },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      const structured = transactions.map((t) => {
+        // Calculate refunded totals from successful (COMPLETED) refund records ONLY
+        const completedRefunds = (t.refunds || []).filter((r) => r.status === "COMPLETED");
+        const total_refunded = completedRefunds.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const original_amount = Number(t.amount || 0);
+        const remaining_balance = Math.max(0, original_amount - total_refunded);
+
+        // Derive accurate payment status
+        let payment_status = t.status;
+        if (t.paypalCaptureId || t.status === "COMPLETED" || t.status === "REFUNDED" || t.status === "PARTIALLY_REFUNDED") {
+          if (total_refunded >= original_amount - 0.001) {
+            payment_status = "REFUNDED";
+          } else if (total_refunded > 0) {
+            payment_status = "PARTIALLY_REFUNDED";
+          } else {
+            payment_status = "COMPLETED";
+          }
+        }
+
+        // Build comprehensive refund history (completed records + rejected/failed approval attempts)
+        const relatedApprovals = refundApprovals.filter((a) => a.targetId === t.id);
+        const refund_history: Array<{ amount: number; status: string; reason?: string; date?: string }> = [];
+
+        // 1. Add completed refunds from database
+        for (const r of completedRefunds) {
+          refund_history.push({
+            amount: Number(r.amount),
+            status: "COMPLETED",
+            reason: r.reason || undefined,
+            date: r.createdAt.toISOString(),
+          });
+        }
+
+        // 2. Add rejected or failed attempts from approval center
+        for (const a of relatedApprovals) {
+          if (a.status === "REJECTED" || a.status === "FAILED") {
+            let parsedPayload: any = {};
+            try {
+              parsedPayload = JSON.parse(a.payload || "{}");
+            } catch {}
+            const attemptAmt = Number(parsedPayload.amount || 0);
+            refund_history.push({
+              amount: attemptAmt,
+              status: a.status,
+              reason: parsedPayload.reason || a.description || undefined,
+              date: a.createdAt.toISOString(),
+            });
+          }
+        }
+
+        return {
+          order_id: t.paypalOrderId,
+          original_amount,
+          total_refunded,
+          remaining_balance,
+          payment_status,
+          refund_history,
           id: t.id,
           paypalOrderId: t.paypalOrderId,
           paypalCaptureId: t.paypalCaptureId,
           amount: t.amount,
           currency: t.currency,
-          status: t.status,
+          status: payment_status,
           customer: t.customer?.name || "Direct Checkout",
           customerEmail: t.customer?.email,
           createdAt: t.createdAt,
           riskScore: t.riskScore,
-        })),
+        };
+      });
+
+      return {
+        count: structured.length,
+        transactions: structured,
       };
     }
 
@@ -247,17 +317,75 @@ export async function executeAITool(
         return { error: `No payment found with identifier: ${args.identifier}` };
       }
 
+      // Fetch related refund approval requests for full attempt history
+      const approvals = await prisma.approvalRequest.findMany({
+        where: {
+          merchantId,
+          actionType: "EXECUTE_REFUND",
+          targetId: payment.id,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      const completedRefunds = (payment.refunds || []).filter((r) => r.status === "COMPLETED");
+      const total_refunded = completedRefunds.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      const original_amount = Number(payment.amount || 0);
+      const remaining_balance = Math.max(0, original_amount - total_refunded);
+
+      let payment_status = payment.status;
+      if (payment.paypalCaptureId || payment.status === "COMPLETED" || payment.status === "REFUNDED" || payment.status === "PARTIALLY_REFUNDED") {
+        if (total_refunded >= original_amount - 0.001) {
+          payment_status = "REFUNDED";
+        } else if (total_refunded > 0) {
+          payment_status = "PARTIALLY_REFUNDED";
+        } else {
+          payment_status = "COMPLETED";
+        }
+      }
+
+      const refund_history: Array<{ amount: number; status: string; reason?: string; paypalRefundId?: string; date: string }> = [];
+      for (const r of completedRefunds) {
+        refund_history.push({
+          amount: Number(r.amount),
+          status: "COMPLETED",
+          reason: r.reason || undefined,
+          paypalRefundId: r.paypalRefundId || undefined,
+          date: r.createdAt.toISOString(),
+        });
+      }
+      for (const a of approvals) {
+        if (a.status === "REJECTED" || a.status === "FAILED") {
+          let parsedPayload: any = {};
+          try {
+            parsedPayload = JSON.parse(a.payload || "{}");
+          } catch {}
+          const attemptAmt = Number(parsedPayload.amount || 0);
+          refund_history.push({
+            amount: attemptAmt,
+            status: a.status,
+            reason: parsedPayload.reason || a.description || undefined,
+            date: a.createdAt.toISOString(),
+          });
+        }
+      }
+
       return {
         payment: {
           id: payment.id,
+          order_id: payment.paypalOrderId,
           paypalOrderId: payment.paypalOrderId,
           paypalCaptureId: payment.paypalCaptureId,
           amount: payment.amount,
+          original_amount,
+          total_refunded,
+          remaining_balance,
           currency: payment.currency,
-          status: payment.status,
+          status: payment_status,
+          payment_status,
           riskScore: payment.riskScore,
           customer: payment.customer,
           refunds: payment.refunds,
+          refund_history,
           lifecycleEvents: payment.events.map((e) => ({
             eventType: e.eventType,
             status: e.status,
@@ -294,13 +422,18 @@ export async function executeAITool(
         orderBy: { createdAt: "desc" },
       });
 
+      // Successful captured payments include COMPLETED, PARTIALLY_REFUNDED, and REFUNDED captures
       const completedPayments = payments.filter(
-        (p) => p.status === "COMPLETED" || p.status === "REFUNDED"
+        (p) => p.status === "COMPLETED" || p.status === "REFUNDED" || p.status === "PARTIALLY_REFUNDED"
       );
-      const totalCaptured = completedPayments.reduce((sum, p) => sum + p.amount, 0);
+      // Gross captured volume comes strictly from original successful captures
+      const totalCaptured = completedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
+      // Refunded totals calculate ONLY successful (COMPLETED) refunds
       const totalRefunded = payments.reduce((sum, p) => {
-        const refunded = p.refunds.reduce((rSum, r) => rSum + r.amount, 0);
+        const refunded = (p.refunds || [])
+          .filter((r) => r.status === "COMPLETED")
+          .reduce((rSum, r) => rSum + Number(r.amount || 0), 0);
         return sum + refunded;
       }, 0);
 
@@ -552,17 +685,27 @@ export async function executeAITool(
         return { error: `Payment not found: ${args.paymentId}` };
       }
 
-      if (payment.status !== "COMPLETED") {
-        return { error: `Payment cannot be refunded because status is ${payment.status}. Must be COMPLETED.` };
+      if (payment.status !== "COMPLETED" && payment.status !== "PARTIALLY_REFUNDED") {
+        return { error: `Payment cannot be refunded because status is ${payment.status}. Must be COMPLETED or PARTIALLY_REFUNDED.` };
       }
 
-      // Check existing refunds
-      const existingRefunded = payment.refunds.reduce((sum, r) => sum + r.amount, 0);
-      const requestedRefund = args.amount ? Number(args.amount) : payment.amount - existingRefunded;
+      // Calculate existing refunds from successful (COMPLETED) records ONLY
+      const priorCompletedRefunds = (payment.refunds || []).filter((r) => r.status === "COMPLETED");
+      const existingRefunded = priorCompletedRefunds.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      const remainingBalance = Math.max(0, payment.amount - existingRefunded);
 
-      if (requestedRefund <= 0 || requestedRefund + existingRefunded > payment.amount) {
+      if (remainingBalance <= 0) {
         return {
-          error: `Invalid refund amount: $${requestedRefund}. Max refundable remaining is $${payment.amount - existingRefunded}.`,
+          error: `Payment ${payment.paypalOrderId} has already been fully refunded ($${existingRefunded.toFixed(2)} refunded of $${payment.amount.toFixed(2)}). Zero balance remains available.`,
+        };
+      }
+
+      const requestedRefund = args.amount ? Number(args.amount) : remainingBalance;
+
+      // Validate live capture: warn/error if requested amount exceeds remaining balance or original paid amount
+      if (requestedRefund <= 0 || requestedRefund > remainingBalance + 0.001) {
+        return {
+          error: `Invalid refund amount: $${requestedRefund.toFixed(2)}. Requested amount exceeds available remaining balance ($${remainingBalance.toFixed(2)} USD available of $${payment.amount.toFixed(2)} original payment).`,
         };
       }
 

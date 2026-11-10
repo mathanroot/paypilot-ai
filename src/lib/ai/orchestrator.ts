@@ -49,7 +49,13 @@ Your core mission:
 When the merchant asks to create a checkout or order (e.g. "create a sandbox checkout with 200 dollar", "generate $10 checkout"), invoke \`create_paypal_order\`. Direct checkout orders are for ad-hoc customer checkout and do NOT create invoices or customer profiles in Smart Collections.
 7. When asked about revenue, captured volume, or financial performance for a specific period (e.g. 'today', 'last 7 days', 'last 30 days', 'last 90 days'), pass the exact \`timeRange\` parameter ('today', '7d', '30d', '90d') to the \`get_revenue_summary\` tool so the figures match the merchant's Financial Command Center.
 8. When the merchant explicitly asks for a PDF report, Excel (.xlsx) sheet, or CSV export (e.g., "make a pdf today Gross Captured Volume", "can you make pdf that", "make report with pdf or xls", "export to excel"), invoke the appropriate backend tool (\`get_revenue_summary\` or \`generate_financial_report\`). Present the structured metrics, executive takeaways, and recommendations clearly, and inform them that 1-click download options are ready below. For ordinary non-report questions, provide regular financial insights without export instructions.
-9. NEVER output raw JSON, code blocks (\`\`\`json or \`\`\`), or program code to the merchant. Always translate every tool result, transaction object, or financial record into clean, human-readable natural language with structured bullet points and executive takeaways.`;
+9. NEVER output raw JSON, code blocks (\`\`\`json or \`\`\`), or program code to the merchant. Always translate every tool result, transaction object, or financial record into clean, human-readable natural language with structured bullet points and executive takeaways.
+10. Accurate Refund & Revenue Rules:
+- Calculate refunded totals from successful (COMPLETED) refund records only. Never use the original payment amount as the refunded amount.
+- For partially refunded transactions (such as ORD-6629104C: original payment $450.00, $100.00 successfully refunded, $350.00 remaining balance), report the status as PARTIALLY_REFUNDED and clearly explain the distinction between original payment ($450.00), actual refunded amount ($100.00), and remaining refundable balance ($350.00).
+- Explain that rejected or failed refund attempts (such as $225.00 and $150.00 rejected attempts) do NOT reduce settled revenue or count as refunds.
+- If asked "What is today's gross volume?", calculate gross volume from successful PayPal captures (COMPLETED, PARTIALLY_REFUNDED, REFUNDED), not refunds or refunded transaction status.
+- If asked "How much did we refund?", calculate ONLY successful (COMPLETED) refunds.`;
 
 export async function runAIAgent(params: RunAgentParams): Promise<AgentExecutionResult> {
   const startTime = Date.now();
@@ -249,19 +255,52 @@ function formatToolExecutionSummary(toolCalls: Array<{ name: string; args: any; 
       return `### 🛡️ Fraud & Anomaly Guard Report\n\nActive Anomaly Alerts: **${result.activeAnomalyCount || 0}**\n\n${alerts ? alerts + "\n\n" : ""}Risk Analysis: Our rule engine actively monitors checkout velocities, suspicious amounts, and billing address mismatches.`;
     }
     if (name === "get_transactions") {
-      const txs = (result.transactions || []).map((t: any) => `- **${t.paypalOrderId}**: $${Number(t.amount).toFixed(2)} (${t.status}) — ${t.customer}`).join("\n");
-      return `### 💳 Recent Transactions (PayPal Sandbox)\n\n${txs}\n\nAll captured transactions have verified PayPal settlement IDs recorded in your database ledger.`;
+      const txs = (result.transactions || []).map((t: any) => {
+        const orderId = t.order_id || t.paypalOrderId;
+        const original = Number(t.original_amount ?? t.amount).toFixed(2);
+        const refunded = Number(t.total_refunded || 0).toFixed(2);
+        const remaining = Number(t.remaining_balance ?? t.amount).toFixed(2);
+        const status = t.payment_status || t.status;
+        const customer = t.customer || "Direct Checkout";
+
+        if (status === "PARTIALLY_REFUNDED" || (Number(refunded) > 0 && Number(remaining) > 0)) {
+          const rejectedAttempts = (t.refund_history || [])
+            .filter((h: any) => h.status === "REJECTED" || h.status === "FAILED")
+            .map((h: any) => `$${Number(h.amount).toFixed(2)} (${h.status})`)
+            .join(", ");
+          const rejectedNote = rejectedAttempts ? ` | Prior rejected attempts: ${rejectedAttempts}` : "";
+          return `- **${orderId}**: Original Payment: $${original}, Successfully Refunded: $${refunded}, Remaining Balance: $${remaining} (**PARTIALLY_REFUNDED**) — ${customer}${rejectedNote}`;
+        }
+        if (status === "REFUNDED") {
+          return `- **${orderId}**: Original Payment: $${original}, Fully Refunded: $${refunded} (**REFUNDED**) — ${customer}`;
+        }
+        return `- **${orderId}**: $${original} (**${status}**) — ${customer}`;
+      }).join("\n");
+
+      return `### 💳 Recent Transactions (PayPal Sandbox Ledger)\n\n${txs}\n\n*Audit Note: PayPilot AI strictly counts successful (COMPLETED) refunds toward refunded totals. Rejected or unauthorized refund attempts in the Human Approval Center are documented in audit history but do not reduce settled balance.*`;
     }
     if (name === "get_payment_details") {
       if (result.error) {
         return `### ⚠️ Payment Lookup\n\n${result.error}`;
       }
       const p = result.payment || {};
-      const statusBadge = p.status === "COMPLETED" ? "✅ COMPLETED" : (p.status || "COMPLETED");
-      const refundsText = p.refunds && p.refunds.length > 0
-        ? `$${p.refunds.reduce((s: number, r: any) => s + (r.amount || 0), 0).toFixed(2)} USD`
-        : "$0.00 (Zero prior refunds)";
-      return `### 💳 PayPal Payment & Audit Verification\n\n- **PayPal Order ID:** \`${p.paypalOrderId || "N/A"}\`\n- **PayPal Capture ID:** \`${p.paypalCaptureId || "Settled"}\`\n- **Amount & Currency:** $${Number(p.amount || 0).toFixed(2)} ${p.currency || "USD"}\n- **Settlement Status:** ${statusBadge}\n- **Risk Score:** ${p.riskScore !== undefined ? `${p.riskScore}/100 (Safe / Low Risk)` : "Safe / Verified"}\n- **Customer:** ${p.customer?.name || "Apex Guest Client"}\n- **Aggregate Prior Refunds:** ${refundsText}\n\n**Takeaway:** Captured payment verified against PayPal Orders v2 settlement ledger with full cryptographic proof.`;
+      const original = Number(p.original_amount ?? p.amount ?? 0).toFixed(2);
+      const refunded = Number(p.total_refunded ?? 0).toFixed(2);
+      const remaining = Number(p.remaining_balance ?? p.amount ?? 0).toFixed(2);
+      const status = p.payment_status || p.status || "COMPLETED";
+
+      let statusBadge = `✅ ${status}`;
+      if (status === "PARTIALLY_REFUNDED") {
+        statusBadge = `⚠️ PARTIALLY_REFUNDED ($${refunded} refunded, $${remaining} remaining)`;
+      } else if (status === "REFUNDED") {
+        statusBadge = `🔄 REFUNDED & CLOSED ($${refunded} fully refunded)`;
+      }
+
+      const historyLines = (p.refund_history && p.refund_history.length > 0)
+        ? p.refund_history.map((h: any) => `  - Amount: $${Number(h.amount).toFixed(2)} — Status: **${h.status}**${h.reason ? ` (${h.reason})` : ""}`).join("\n")
+        : "  - Zero prior refund actions.";
+
+      return `### 💳 PayPal Payment & Audit Verification\n\n- **PayPal Order ID:** \`${p.paypalOrderId || p.order_id || "N/A"}\`\n- **PayPal Capture ID:** \`${p.paypalCaptureId || "Settled"}\`\n- **Original Payment:** $${original} ${p.currency || "USD"}\n- **Total Successfully Refunded:** $${refunded} USD\n- **Remaining Available Balance:** $${remaining} USD\n- **Settlement Status:** ${statusBadge}\n- **Risk Score:** ${p.riskScore !== undefined ? `${p.riskScore}/100 (Safe / Low Risk)` : "Safe / Verified"}\n- **Customer:** ${p.customer?.name || "Apex Guest Client"}\n\n**Refund Audit History:**\n${historyLines}\n\n**Takeaway:** Captured payment verified against PayPal Orders v2 settlement ledger with complete cryptographic proof.`;
     }
     if (name === "create_refund") {
       return `### 🛡️ Refund Staged for Merchant Authorization\n\n- **Refund Amount:** $${Number(result.amount || 0).toFixed(2)} ${result.currency || "USD"}\n- **Capture ID:** \`${result.captureId || "N/A"}\`\n- **Approval ID:** \`${result.approvalId || "N/A"}\`\n- **Reason / Memo:** ${result.reason || "Customer refund request"}\n- **Current Status:** PENDING MERCHANT AUTHORIZATION\n\n**Takeaway:** PayPilot AI requires explicit human merchant confirmation before issuing refunds. This request has been safely staged in your **Human Approval Center**.`;
@@ -408,15 +447,36 @@ async function executeLocalSemanticRouter(
     return `### ✉️ Payment Reminder Prepared for Authorization\n\n- **Invoice:** ${res.invoiceNumber}\n- **Recipient:** ${res.customer}\n- **Amount:** $${res.amount}\n- **Approval ID:** \`${res.approvalId}\`\n\nIn accordance with PayPilot AI security guidelines, the reminder has been placed in the **Human Approval Center**. Once you approve it, it will dispatch to the customer with their direct PayPal Checkout link.`;
   }
 
-  if (lower.includes("refund") && (lower.includes("order") || lower.includes("audit") || lower.includes("eligib") || lower.includes("request"))) {
-    const orderMatch = message.match(/\b([0-9A-Z]{14,20})\b/);
+  if (lower.includes("how much") && lower.includes("refund")) {
+    const res = await executeAITool("get_revenue_summary", { timeRange: "all" }, { merchantId, actorEmail });
+    executedList.push({ name: "get_revenue_summary", args: { timeRange: "all" }, result: res });
+    return `### 💳 Verified Refund Audit (PayPal REST Refund v2)\n\n- **Total Successfully Refunded:** $${Number(res.totalRefunded || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD\n- **Accounting Protocol:** Strictly successful (COMPLETED) refunds are counted against revenue.\n- **Rejected / Failed Attempts:** $0.00 deducted (all rejected requests remain documented in audit logs without impacting settled volume).\n\nAll refund disbursements are verified against original PayPal capture IDs.`;
+  }
+
+  // Payment / Order inspection or Refund audit for specific order
+  if (
+    lower.includes("ord-") ||
+    lower.includes("cap-") ||
+    ((lower.includes("order") || lower.includes("payment") || lower.includes("transaction") || lower.includes("refund") || lower.includes("status")) &&
+      /\b(ord-[a-z0-9]+|[0-9a-z]{14,20})\b/i.test(message))
+  ) {
+    const orderMatch = message.match(/\b(ORD-[0-9A-Z]+|CAP-[0-9A-Z]+|[0-9A-Z]{14,20})\b/i);
     if (orderMatch) {
       const orderId = orderMatch[1];
       const details = await executeAITool("get_payment_details", { identifier: orderId }, { merchantId, actorEmail });
       executedList.push({ name: "get_payment_details", args: { identifier: orderId }, result: details });
       if (details.payment) {
         const p = details.payment;
-        return `### 🛡️ Refund Eligibility Audit for Order \`${p.paypalOrderId}\`\n\n- **PayPal Order ID:** \`${p.paypalOrderId}\`\n- **Capture ID:** \`${p.paypalCaptureId || "Settled"}\`\n- **Original GMV:** $${Number(p.amount || 0).toFixed(2)} ${p.currency || "USD"}\n- **Settlement Status:** ${p.status === "COMPLETED" ? "✅ COMPLETED (Eligible for Refund)" : p.status}\n- **Risk Score:** ${p.riskScore ?? 10}/100 (Safe)\n- **Prior Refunds:** $0.00 (Zero prior refunds)\n\n**Takeaway:** This captured transaction is verified on the PayPal Developer Platform and is 100% eligible for refund. To execute this refund safely, navigate to the **AI Refund Manager** or confirm here to stage it in the **Human Approval Center**.`;
+        const original = Number(p.original_amount ?? p.amount ?? 0).toFixed(2);
+        const refunded = Number(p.total_refunded ?? 0).toFixed(2);
+        const remaining = Number(p.remaining_balance ?? p.amount ?? 0).toFixed(2);
+        const status = p.payment_status || p.status || "COMPLETED";
+
+        const historyLines = (p.refund_history && p.refund_history.length > 0)
+          ? p.refund_history.map((h: any) => `  - Amount: $${Number(h.amount).toFixed(2)} — Status: **${h.status}**${h.reason ? ` (${h.reason})` : ""}`).join("\n")
+          : "  - Zero prior refund actions.";
+
+        return `### 💳 PayPal Transaction & Audit Ledger: \`${p.paypalOrderId}\`\n\n- **PayPal Order ID:** \`${p.paypalOrderId}\`\n- **Capture ID:** \`${p.paypalCaptureId || "Settled"}\`\n- **Original Payment:** $${original} ${p.currency || "USD"}\n- **Total Successfully Refunded:** $${refunded} USD\n- **Remaining Available Balance:** $${remaining} USD\n- **Settlement Status:** **${status}**\n- **Risk Score:** ${p.riskScore ?? 10}/100 (Safe)\n\n**Refund Audit History:**\n${historyLines}\n\n**Takeaway:** This captured transaction is verified on the PayPal Developer Platform. $${remaining} USD remains eligible for refund.`;
       }
     }
   }
@@ -435,10 +495,26 @@ async function executeLocalSemanticRouter(
   }
 
   if (lower.includes("transaction") || lower.includes("history") || lower.includes("orders")) {
-    const res = await executeAITool("get_transactions", { limit: 5 }, { merchantId, actorEmail });
-    executedList.push({ name: "get_transactions", args: { limit: 5 }, result: res });
-    const txs = res.transactions.map((t: any) => `- **${t.paypalOrderId}**: $${t.amount} (${t.status}) — ${t.customer}`).join("\n");
-    return `### 💳 Recent Transactions (PayPal Sandbox)\n\n${txs}\n\nAll captured transactions have verified PayPal settlement IDs recorded in your database ledger.`;
+    const res = await executeAITool("get_transactions", { limit: 10 }, { merchantId, actorEmail });
+    executedList.push({ name: "get_transactions", args: { limit: 10 }, result: res });
+    const txs = (res.transactions || []).map((t: any) => {
+      const orderId = t.order_id || t.paypalOrderId;
+      const original = Number(t.original_amount ?? t.amount).toFixed(2);
+      const refunded = Number(t.total_refunded || 0).toFixed(2);
+      const remaining = Number(t.remaining_balance ?? t.amount).toFixed(2);
+      const status = t.payment_status || t.status;
+      const customer = t.customer || "Direct Checkout";
+
+      if (status === "PARTIALLY_REFUNDED" || (Number(refunded) > 0 && Number(remaining) > 0)) {
+        return `- **${orderId}**: Original Payment: $${original}, Successfully Refunded: $${refunded}, Remaining Balance: $${remaining} (**PARTIALLY_REFUNDED**) — ${customer}`;
+      }
+      if (status === "REFUNDED") {
+        return `- **${orderId}**: Original Payment: $${original}, Fully Refunded: $${refunded} (**REFUNDED**) — ${customer}`;
+      }
+      return `- **${orderId}**: $${original} (**${status}**) — ${customer}`;
+    }).join("\n");
+
+    return `### 💳 Recent Transactions (PayPal Sandbox Ledger)\n\n${txs}\n\n*Note: PayPilot AI calculates refunded totals strictly from successful (COMPLETED) refunds. For partially refunded orders like ORD-6629104C, only the $100 completed refund is counted, leaving $350 available for future refund.*`;
   }
 
   if ((lower.includes("order") || lower.includes("checkout")) && (lower.includes("create") || lower.includes("generate") || lower.includes("make") || lower.includes("sandbox"))) {

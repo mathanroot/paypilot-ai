@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { getCurrentMerchant } from "@/lib/auth";
-import { refundPayPalCapture } from "@/lib/paypal";
 import { prisma } from "@/lib/db";
+import { refundPayPalCapture } from "@/lib/paypal";
 import { z } from "zod";
+
+export const dynamic = "force-dynamic";
 
 const refundSchema = z.object({
   paymentId: z.string().min(1),
   amount: z.number().positive().optional(),
-  reason: z.string().min(3),
+  reason: z.string().min(1).default("Customer refund request"),
 });
 
 export async function POST(request: Request) {
@@ -20,14 +22,17 @@ export async function POST(request: Request) {
     const body = await request.json();
     const parsed = refundSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid refund parameters" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid refund payload" }, { status: 400 });
     }
 
     const { paymentId, amount, reason } = parsed.data;
 
-    // Check payment eligibility
+    // Find payment
     const payment = await prisma.payment.findFirst({
-      where: { id: paymentId, merchantId: merchant.id },
+      where: {
+        id: paymentId,
+        merchantId: merchant.id,
+      },
       include: { refunds: true },
     });
 
@@ -35,23 +40,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Payment record not found" }, { status: 404 });
     }
 
-    if (payment.status !== "COMPLETED") {
+    // Allow refunds for both COMPLETED and PARTIALLY_REFUNDED payments
+    if (payment.status !== "COMPLETED" && payment.status !== "PARTIALLY_REFUNDED") {
       return NextResponse.json(
-        { error: `Payment is in ${payment.status} state. Only COMPLETED payments can be refunded.` },
+        { error: `Payment is in "${payment.status}" state. Only COMPLETED or PARTIALLY_REFUNDED payments can be refunded.` },
         { status: 400 }
       );
     }
 
+    // Calculate total prior refunds from successful (COMPLETED) records ONLY
     const totalPriorRefunds = payment.refunds
       .filter((r) => r.status === "COMPLETED")
-      .reduce((sum, r) => sum + r.amount, 0);
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
-    const remainingBalance = payment.amount - totalPriorRefunds;
-    const refundAmount = amount ? Math.min(amount, remainingBalance) : remainingBalance;
+    const remainingBalance = Math.max(0, Number(payment.amount || 0) - totalPriorRefunds);
 
-    if (refundAmount <= 0) {
+    if (remainingBalance <= 0.001) {
       return NextResponse.json({ error: "Payment has already been fully refunded" }, { status: 400 });
     }
+
+    if (amount !== undefined && amount > remainingBalance + 0.001) {
+      return NextResponse.json(
+        { error: `Refund amount ($${amount.toFixed(2)}) exceeds remaining refundable balance ($${remainingBalance.toFixed(2)}).` },
+        { status: 400 }
+      );
+    }
+
+    const refundAmount = amount ? Math.min(amount, remainingBalance) : remainingBalance;
 
     const captureId = payment.paypalCaptureId || `CAP-${payment.paypalOrderId}`;
 
@@ -76,7 +91,8 @@ export async function POST(request: Request) {
       }
     }
 
-    const isFullRefund = refundAmount + totalPriorRefunds >= payment.amount;
+    const isFullRefund = refundAmount + totalPriorRefunds >= payment.amount - 0.001;
+    const nextStatus = isFullRefund ? "REFUNDED" : "PARTIALLY_REFUNDED";
 
     // Persist refund record
     const refund = await prisma.refund.create({
@@ -96,11 +112,11 @@ export async function POST(request: Request) {
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
-        status: isFullRefund ? "REFUNDED" : "PARTIALLY_REFUNDED",
+        status: nextStatus,
         events: {
           create: {
-            eventType: "REFUND_COMPLETED",
-            status: "COMPLETED",
+            eventType: isFullRefund ? "REFUND_COMPLETED" : "PARTIAL_REFUND_COMPLETED",
+            status: nextStatus,
             rawPayload: JSON.stringify(refundResult),
           },
         },
@@ -116,7 +132,10 @@ export async function POST(request: Request) {
         details: JSON.stringify({
           refundId: refund.id,
           paypalRefundId: refundResult.id,
+          original_amount: payment.amount,
           amount: refundAmount,
+          total_refunded: totalPriorRefunds + refundAmount,
+          remaining_balance: Math.max(0, remainingBalance - refundAmount),
           reason,
         }),
       },
@@ -126,7 +145,11 @@ export async function POST(request: Request) {
       success: true,
       refundId: refund.id,
       paypalRefundId: refundResult.id,
+      original_amount: payment.amount,
       amount: refundAmount,
+      total_refunded: totalPriorRefunds + refundAmount,
+      remaining_balance: Math.max(0, remainingBalance - refundAmount),
+      payment_status: nextStatus,
       status: "COMPLETED",
     });
   } catch (err: any) {
