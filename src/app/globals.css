@@ -46,3 +46,135 @@ body {
   border-color: rgba(99, 102, 241, 0.5);
   box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.25);
 }
+
+/* AG Grid Deep Dark FinTech Overrides */
+.ag-theme-quartz-dark,
+.ag-theme-quartz,
+[class*="ag-theme-"] {
+  --ag-background-color: #0A0F1E !important;
+  --ag-header-background-color: #060A15 !important;
+  --ag-odd-row-background-color: #080D1A !important;
+  --ag-border-color: rgba(255, 255, 255, 0.08) !important;
+  --ag-row-border-color: rgba(255, 255, 255, 0.05) !important;
+  --ag-header-foreground-color: #94a3b8 !important;
+  --ag-foreground-color: #f1f5f9 !important;
+  --ag-row-hover-color: rgba(99, 102, 241, 0.12) !important;
+  --ag-selected-row-background-color: rgba(99, 102, 241, 0.2) !important;
+  --ag-font-family: inherit !important;
+  --ag-font-size: 12px !important;
+  --ag-border-radius: 16px !important;
+  --ag-cell-horizontal-padding: 16px !important;
+  --ag-control-panel-background-color: #060A15 !important;
+  --ag-subheader-background-color: #060A15 !important;
+  --ag-input-focus-border-color: #00f5ff !important;
+  background-color: #0A0F1E !important;
+  background: #0A0F1E !important;
+  color: #f1f5f9 !important;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Ensure all AG Grid viewport and container levels are dark */
+.ag-root,
+.ag-root-wrapper,
+.ag-root-wrapper-body,
+.ag-body,
+.ag-body-viewport,
+.ag-body-horizontal-scroll,
+.ag-body-horizontal-scroll-viewport,
+.ag-center-cols-viewport,
+.ag-center-cols-container,
+.ag-center-cols-clipper,
+.ag-scrolls {
+  background-color: #0A0F1E !important;
+  background: #0A0F1E !important;
+  color: #f1f5f9 !important;
+  border: none !important;
+}
+
+.ag-theme-quartz-dark .ag-header,
+.ag-theme-quartz .ag-header {
+  background-color: #060A15 !important;
+  background: #060A15 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.ag-theme-quartz-dark .ag-header-cell-label,
+.ag-theme-quartz .ag-header-cell-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  color: #94a3b8 !important;
+}
+
+.ag-theme-quartz-dark .ag-row,
+.ag-theme-quartz .ag-row {
+  background-color: #0A0F1E !important;
+  background: #0A0F1E !important;
+  color: #f1f5f9 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.ag-theme-quartz-dark .ag-row-odd,
+.ag-theme-quartz .ag-row-odd {
+  background-color: #080D1A !important;
+  background: #080D1A !important;
+}
+
+.ag-theme-quartz-dark .ag-row-hover,
+.ag-theme-quartz .ag-row-hover {
+  background-color: rgba(99, 102, 241, 0.12) !important;
+  background: rgba(99, 102, 241, 0.12) !important;
+}
+
+/* Pagination Panel & Controls */
+.ag-theme-quartz-dark .ag-paging-panel,
+.ag-theme-quartz .ag-paging-panel,
+.ag-paging-panel {
+  background-color: #060A15 !important;
+  background: #060A15 !important;
+  color: #94a3b8 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: 10px 16px !important;
+}
+
+.ag-theme-quartz-dark .ag-paging-button,
+.ag-theme-quartz .ag-paging-button,
+.ag-paging-button {
+  color: #94a3b8 !important;
+}
+
+.ag-theme-quartz-dark .ag-paging-button:hover,
+.ag-theme-quartz .ag-paging-button:hover,
+.ag-paging-button:hover {
+  color: #00f5ff !important;
+}
+
+/* Dropdown & Page Size selectors */
+.ag-theme-quartz-dark .ag-picker-field,
+.ag-theme-quartz .ag-picker-field,
+.ag-picker-field-wrapper,
+.ag-picker-field-display,
+.ag-picker-field,
+.ag-select,
+.ag-text-field-input,
+.ag-input-wrapper {
+  background-color: #0A0F1E !important;
+  background: #0A0F1E !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #f1f5f9 !important;
+  border-radius: 8px !important;
+}
+
+.ag-theme-quartz-dark select,
+.ag-theme-quartz select,
+.ag-paging-page-size select {
+  background-color: #0A0F1E !important;
+  background: #0A0F1E !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #f1f5f9 !important;
+  border-radius: 8px !important;
+  padding: 4px 8px !important;
+}

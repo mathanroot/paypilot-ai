@@ -57,12 +57,22 @@ This document provides a transparent and detailed breakdown of every tool, SDK, 
 - **Purpose:** High-performance test runner executing unit and integration tests across Authentication, PayPal REST APIs, and AI Agent Tools.
 - **Test Results:** 11 passed across 3 test suites (`tests/auth.test.ts`, `tests/paypal.test.ts`, `tests/ai-tools.test.ts`).
 
+### AG Grid Enterprise & Community
+- **Purpose:** High-performance FinTech data virtualization, multi-column sorting, filtering, and interactive tabular UX across merchant transaction ledgers and client invoicing matrices.
+- **Components Used:**
+  - `ag-grid-community` & `ag-grid-react` (v36.3.0)
+  - Custom dark theme styling via `@ag-theme-quartz-dark` tailored to PayPilot AI's neon-indigo FinTech aesthetic
+  - Custom cell renderers for PayPal Order IDs, capture state badges, partial refund balance calculations, risk scores, and 1-click PayPal checkout triggers
+  - View switcher allowing merchants and hackathon judges to seamlessly toggle between the high-speed AG Grid Data Matrix and the responsive Classic View
+- **Integration Layer:** `src/app/transactions/page.tsx` and `src/app/invoices/page.tsx`.
+
 ---
 
 ## 3. Sponsor Technologies Disclosure & Evaluation
 
-- **Render:** Target hosting platform for production deployment, supporting containerized Next.js and managed PostgreSQL.
-- **AG Grid:** Evaluated for transaction table virtualization. A lightweight responsive Tailwind table was chosen for optimal mobile loading speeds and zero external licensing overhead.
+- **PayPal Developer Platform:** Core sponsor platform powering end-to-end checkout, capture, refund, and webhook verification.
+- **Render:** Production deployment platform hosting containerized Next.js full-stack instance, automated database push/seed workflows, and SSL live endpoints.
+- **AG Grid:** Core sponsor platform actively integrated across primary financial tables (Transactions Ledger and Smart Collections Invoicing) with custom cell renderers and quartz-dark styling.
 - **Postman:** Used for API collection testing of PayPal Sandbox endpoints during development.
 
 ---
