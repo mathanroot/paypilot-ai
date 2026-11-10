@@ -1,10 +1,12 @@
 // PayPilot AI - AI Agent Orchestration Engine
 // Powered by NVIDIA NIM (National Institute of Standards/AI Microservices)
 // NVIDIA Function Calling with Real Backend Execution, State Tracking, and Audit Logging
+// Augmented with APIMatic Instant PayPal Context Plugin
 
 import OpenAI from "openai";
 import { AI_TOOL_DEFINITIONS, executeAITool } from "./tools";
 import { prisma } from "../db";
+import { getAPIMaticPromptContext } from "./apimaticContext";
 
 function getNvidiaClient(): OpenAI | null {
   const apiKey = process.env.NVIDIA_API_KEY;
@@ -26,6 +28,18 @@ export interface RunAgentParams {
   userMessage: string;
 }
 
+export interface AgentActionCard {
+  type: "INVOICE" | "CHECKOUT" | "APPROVAL" | "FRAUD" | "REPORT" | "SWEEP";
+  title: string;
+  subtitle?: string;
+  amount?: number;
+  currency?: string;
+  link?: string;
+  badge?: string;
+  actionLabel?: string;
+  actionUrl?: string;
+}
+
 export interface AgentExecutionResult {
   conversationId: string;
   reply: string;
@@ -34,10 +48,92 @@ export interface AgentExecutionResult {
     args: Record<string, any>;
     result: any;
   }>;
+  actionCards?: AgentActionCard[];
   latencyMs: number;
 }
 
+export function extractActionCards(toolCalls: Array<{ name: string; args: any; result: any }>): AgentActionCard[] {
+  const cards: AgentActionCard[] = [];
+  for (const tc of toolCalls) {
+    if (tc.name === "create_invoice" && tc.result?.invoice) {
+      cards.push({
+        type: "INVOICE",
+        title: `Invoice ${tc.result.invoice.invoiceNumber}`,
+        subtitle: `Client: ${tc.result.invoice.customer?.name || "Client"} • $${Number(tc.result.invoice.amount).toFixed(2)} USD`,
+        amount: Number(tc.result.invoice.amount),
+        currency: tc.result.invoice.currency || "USD",
+        link: tc.result.invoice.paymentLink,
+        actionLabel: "Pay with PayPal",
+        actionUrl: tc.result.invoice.paymentLink,
+      });
+    } else if (tc.name === "create_paypal_order" && tc.result?.orderId) {
+      cards.push({
+        type: "CHECKOUT",
+        title: `PayPal Sandbox Order #${tc.result.orderId}`,
+        subtitle: `$${Number(tc.result.amount).toFixed(2)} ${tc.result.currency || "USD"} direct checkout order ready`,
+        amount: Number(tc.result.amount),
+        currency: tc.result.currency || "USD",
+        link: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+        actionLabel: "Open PayPal Checkout",
+        actionUrl: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+      });
+    } else if (tc.name === "stage_refund" && tc.result?.approvalId) {
+      cards.push({
+        type: "APPROVAL",
+        title: `Refund Authorization Staged`,
+        subtitle: `Order: ${tc.result.targetId} • Amount: $${Number(tc.result.amount).toFixed(2)} USD`,
+        amount: Number(tc.result.amount),
+        actionLabel: "Review in Approval Center",
+        actionUrl: "/approvals",
+        badge: "PENDING_APPROVAL",
+      });
+    } else if (tc.name === "prepare_payment_reminder" && tc.result?.actionId) {
+      cards.push({
+        type: "APPROVAL",
+        title: `Overdue Collection Notice Prepared`,
+        subtitle: `Target: ${tc.result.customerName || tc.result.invoiceNumber} • Staged for merchant confirmation`,
+        actionLabel: "Authorize in Approval Center",
+        actionUrl: "/approvals",
+        badge: "HUMAN_GUARD_ACTIVE",
+      });
+    } else if (tc.name === "detect_fraud_anomalies" && (tc.result?.openAlertsCount > 0 || tc.result?.anomalies?.length > 0)) {
+      cards.push({
+        type: "FRAUD",
+        title: `Sentinel Security Advisory`,
+        subtitle: `${tc.result.openAlertsCount || tc.result.anomalies?.length} open security anomalies detected`,
+        actionLabel: "Inspect Risk Sentinel",
+        actionUrl: "/fraud",
+        badge: "RISK_ALERT",
+      });
+    } else if (tc.name === "run_autonomous_sweep" && tc.result) {
+      if (tc.result.remindersStaged > 0) {
+        cards.push({
+          type: "APPROVAL",
+          title: `${tc.result.remindersStaged} Overdue Notices Staged`,
+          subtitle: `Automated collection reminders staged for merchant authorization`,
+          actionLabel: "Review in Approval Center",
+          actionUrl: "/approvals",
+          badge: "HUMAN_GUARD_ACTIVE",
+        });
+      }
+      if (tc.result.anomaliesDetected > 0) {
+        cards.push({
+          type: "FRAUD",
+          title: `${tc.result.anomaliesDetected} Security Anomalies Flagged`,
+          subtitle: `Flagged in Sentinel for velocity verification`,
+          actionLabel: "Inspect Risk Sentinel",
+          actionUrl: "/fraud",
+          badge: "RISK_ALERT",
+        });
+      }
+    }
+  }
+  return cards;
+}
+
 const SYSTEM_PROMPT = `You are PayPilot AI, an elite autonomous financial operations assistant for merchants and business owners integrated directly into the PayPal Developer Platform and merchant ledger.
+
+${getAPIMaticPromptContext()}
 
 Your core mission:
 1. Provide accurate, data-backed financial answers using your tools.
@@ -214,16 +310,22 @@ export async function runAIAgent(params: RunAgentParams): Promise<AgentExecution
     });
   } catch {}
 
+  const actionCards = extractActionCards(toolCallsExecuted);
+
   return {
     conversationId,
     reply: finalReply,
     toolCallsExecuted,
+    actionCards,
     latencyMs,
   };
 }
 
 function formatToolExecutionSummary(toolCalls: Array<{ name: string; args: any; result: any }>): string {
   const summaries = toolCalls.map(({ name, result, args }) => {
+    if (name === "run_autonomous_sweep") {
+      return result.briefing || `### 🚀 PayPilot Autonomous Financial Sweep Complete\n\n- **Overdue Invoices Audited:** ${result.overdueInvoicesScanned}\n- **Reminders Staged:** ${result.remindersStaged}\n- **Anomalies Detected:** ${result.anomaliesDetected}\n- **Orders Reconciled:** ${result.reconciledOrders}\n\nAll sensitive actions have been staged in the Human Approval Center for confirmation.`;
+    }
     if (name === "get_revenue_summary") {
       const range = (result.timeRange || args?.timeRange || "today").toLowerCase();
       const periodLabel =
@@ -356,7 +458,22 @@ async function executeLocalSemanticRouter(
     lower.startsWith("hello ") ||
     lower.startsWith("hey ")
   ) {
-    return `Hello! I am **PayPilot AI**, your autonomous financial operations agent integrated with the **PayPal Developer Platform**.\n\nI can execute operations across your account:\n- **Check captured revenue:** "What is my Gross Captured Volume today?"\n- **Generate client invoices:** "Create a new invoice of $50 for Acme"\n- **Create sandbox checkout:** "Create a sandbox checkout with 200 dollar"\n- **Audit refund claims:** "Audit refund eligibility for recent payments"\n- **Fraud analysis:** "Check active fraud alerts and anomalies"\n\nHow can I help you today?`;
+    return `Hello! I am **PayPilot AI**, your autonomous financial operations agent integrated with the **PayPal Developer Platform**.\n\nI can execute operations across your account:\n- **Check captured revenue:** "What is my Gross Captured Volume today?"\n- **Generate client invoices:** "Create a new invoice of $50 for Acme"\n- **Create sandbox checkout:** "Create a sandbox checkout with 200 dollar"\n- **Autonomous Audit Sweep:** "Run autonomous financial sweep"\n- **Audit refund claims:** "Audit refund eligibility for recent payments"\n- **Fraud analysis:** "Check active fraud alerts and anomalies"\n\nHow can I help you today?`;
+  }
+
+  // 2. Autonomous Financial Sweep
+  if (
+    lower.includes("sweep") ||
+    lower.includes("audit ledger") ||
+    lower.includes("audit finances") ||
+    lower.includes("audit everything") ||
+    lower.includes("morning audit") ||
+    lower.includes("daily audit") ||
+    lower.includes("health check")
+  ) {
+    const res = await executeAITool("run_autonomous_sweep", {}, { merchantId, actorEmail });
+    executedList.push({ name: "run_autonomous_sweep", args: {}, result: res });
+    return res.briefing || `### 🚀 PayPilot Autonomous Financial Sweep Complete\n\nAudit executed across ${res.overdueInvoicesScanned} overdue receivables and ${res.reconciledOrders} pending orders. Sensitive actions staged in the Approval Center.`;
   }
 
   if (

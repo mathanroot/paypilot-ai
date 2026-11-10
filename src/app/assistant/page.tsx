@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
+import Link from "next/link";
 import {
   Bot,
   User,
@@ -23,6 +24,12 @@ import {
   History,
   Search,
   Pencil,
+  Receipt,
+  CreditCard,
+  ArrowRight,
+  Check,
+  Copy,
+  RefreshCw,
 } from "lucide-react";
 import FormattedChatMessage from "@/components/FormattedChatMessage";
 
@@ -34,6 +41,17 @@ interface Message {
     name: string;
     args: any;
     result: any;
+  }>;
+  actionCards?: Array<{
+    type: "INVOICE" | "CHECKOUT" | "APPROVAL" | "FRAUD" | "REPORT" | "SWEEP";
+    title: string;
+    subtitle?: string;
+    amount?: number;
+    currency?: string;
+    link?: string;
+    badge?: string;
+    actionLabel?: string;
+    actionUrl?: string;
   }>;
   latencyMs?: number;
   timestamp: string;
@@ -110,7 +128,59 @@ export default function AssistantPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [sweeping, setSweeping] = useState(false);
+  const [copiedCardIdx, setCopiedCardIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleRunAutonomousSweep = async () => {
+    setSweeping(true);
+    try {
+      const res = await fetch("/api/ai/sweep", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Autonomous sweep failed");
+
+      const sweep = data.sweep;
+      const sweepMsg: Message = {
+        id: `sweep-${Date.now()}`,
+        role: "assistant",
+        content: sweep.briefing,
+        actionCards: [
+          ...(sweep.remindersStaged > 0
+            ? [
+                {
+                  type: "APPROVAL" as const,
+                  title: `${sweep.remindersStaged} Overdue Notices Staged`,
+                  subtitle: "Prepared for merchant confirmation in Human Approval Center",
+                  actionLabel: "Review in Approval Center",
+                  actionUrl: "/approvals",
+                  badge: "AUTONOMOUS_SWEEP",
+                },
+              ]
+            : []),
+          ...(sweep.anomaliesDetected > 0
+            ? [
+                {
+                  type: "FRAUD" as const,
+                  title: `${sweep.anomaliesDetected} Security Anomalies Flagged`,
+                  subtitle: "Flagged in Sentinel for velocity verification",
+                  actionLabel: "Inspect Risk Sentinel",
+                  actionUrl: "/fraud",
+                  badge: "SENTINEL_ALERT",
+                },
+              ]
+            : []),
+        ],
+        timestamp: sweep.timestamp,
+        latencyMs: 142,
+      };
+
+      setMessages((prev) => [...prev, sweepMsg]);
+    } catch (err: any) {
+      alert("Autonomous Sweep error: " + err.message);
+    } finally {
+      setSweeping(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -249,6 +319,7 @@ export default function AssistantPage() {
         role: "assistant",
         content: data.reply,
         toolCalls: data.toolCallsExecuted,
+        actionCards: data.actionCards,
         latencyMs: data.latencyMs,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
@@ -317,6 +388,7 @@ export default function AssistantPage() {
         role: "assistant",
         content: data.reply,
         toolCalls: data.toolCallsExecuted,
+        actionCards: data.actionCards,
         latencyMs: data.latencyMs,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
@@ -512,10 +584,20 @@ export default function AssistantPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="hidden md:flex items-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={handleRunAutonomousSweep}
+                disabled={sweeping}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:brightness-110 text-white text-xs font-semibold shadow-md shadow-emerald-500/10 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                title="Run Proactive Autonomous Financial Sweep (Audit overdue receivables, scan velocity anomalies, stage approvals)"
+              >
+                <Sparkles className={`w-3.5 h-3.5 text-cyan-200 ${sweeping ? "animate-spin" : ""}`} />
+                <span>{sweeping ? "Auditing..." : "Run Autonomous Sweep"}</span>
+              </button>
+
+              <div className="hidden lg:flex items-center gap-2 text-xs text-slate-400">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Human Approval Guard Enabled</span>
+                <span>Human Guard Enabled</span>
               </div>
             </div>
           </div>
@@ -563,10 +645,92 @@ export default function AssistantPage() {
 
                   {/* Message Content with UI/UX Designer Rendering */}
                   {msg.role === "assistant" ? (
-                    <FormattedChatMessage
-                      content={msg.content}
-                      allowExport={checkIfExportRequested(idx)}
-                    />
+                    <>
+                      <FormattedChatMessage
+                        content={msg.content}
+                        allowExport={checkIfExportRequested(idx)}
+                      />
+
+                      {/* Interactive Agentic Action Cards */}
+                      {msg.actionCards && msg.actionCards.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-surface-border/60 space-y-2">
+                          <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 tracking-wider">
+                            <Sparkles className="w-3 h-3 text-accent-cyan" />
+                            <span>1-Click Autonomous Action Cards:</span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {msg.actionCards.map((card, cIdx) => (
+                              <div
+                                key={cIdx}
+                                className="p-3 rounded-xl bg-[#060A18] border border-white/10 hover:border-cyan-500/40 transition-all space-y-2 shadow-sm"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="space-y-0.5">
+                                    <div className="font-semibold text-xs text-white flex items-center gap-1.5">
+                                      {card.type === "INVOICE" && <Receipt className="w-3.5 h-3.5 text-cyan-400" />}
+                                      {card.type === "CHECKOUT" && <CreditCard className="w-3.5 h-3.5 text-emerald-400" />}
+                                      {card.type === "APPROVAL" && <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />}
+                                      {card.type === "FRAUD" && <AlertCircle className="w-3.5 h-3.5 text-rose-400" />}
+                                      <span>{card.title}</span>
+                                    </div>
+                                    {card.subtitle && (
+                                      <p className="text-[11px] text-slate-400 leading-snug">{card.subtitle}</p>
+                                    )}
+                                  </div>
+                                  {card.badge && (
+                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-cyan-300 shrink-0">
+                                      {card.badge}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2 pt-1">
+                                  {card.actionUrl && (
+                                    card.actionUrl.startsWith("http") ? (
+                                      <a
+                                        href={card.actionUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 py-1.5 px-3 rounded-lg bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition"
+                                      >
+                                        <span>{card.actionLabel || "Open PayPal"}</span>
+                                        <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    ) : (
+                                      <Link
+                                        href={card.actionUrl}
+                                        className="flex-1 py-1.5 px-3 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                                      >
+                                        <span>{card.actionLabel || "View Action"}</span>
+                                        <ArrowRight className="w-3 h-3" />
+                                      </Link>
+                                    )
+                                  )}
+
+                                  {card.link && (
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(card.link || "");
+                                        setCopiedCardIdx(cIdx);
+                                        setTimeout(() => setCopiedCardIdx(null), 2000);
+                                      }}
+                                      className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition"
+                                      title="Copy Link"
+                                    >
+                                      {copiedCardIdx === cIdx ? (
+                                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   ) : editingMsgId === msg.id ? (
                     /* Inline User Message Editor */
                     <div className="space-y-2.5 min-w-[260px] sm:min-w-[340px]">

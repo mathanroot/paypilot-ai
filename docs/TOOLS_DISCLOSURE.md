@@ -54,8 +54,23 @@ This document provides a transparent and detailed breakdown of every tool, SDK, 
 ## 2. Testing & Quality Assurance Tools
 
 ### Vitest
-- **Purpose:** High-performance test runner executing unit and integration tests across Authentication, PayPal REST APIs, and AI Agent Tools.
-- **Test Results:** 11 passed across 3 test suites (`tests/auth.test.ts`, `tests/paypal.test.ts`, `tests/ai-tools.test.ts`).
+- **Purpose:** High-performance test runner executing unit and integration tests across Authentication, PayPal REST APIs, NVIDIA NIM AI Agent Tools, Approval Center, and Refund Lifecycle.
+- **Test Results:** 27 passed across 7 test suites (`tests/auth.test.ts`, `tests/paypal.test.ts`, `tests/ai-tools.test.ts`, `tests/nvidia-nim.test.ts`, `tests/approval-center.test.ts`, `tests/refund-reporting.test.ts`, `tests/sync-and-conversations.test.ts`).
+
+### Autonomous AI Operations Engine
+- **Purpose:** Self-driving financial operations engine delivering proactive financial sweeps, automated overdue receivables collections, risk anomaly detection, real-time PayPal webhook dispute handling, and interactive agentic action cards.
+- **Components Used:**
+  - `src/lib/ai/sweep.ts` & `src/app/api/ai/sweep/route.ts` (Autonomous Financial Sweep Engine)
+  - `src/app/assistant/page.tsx` (1-click Sweep Trigger & Interactive Agentic Action Cards)
+  - `src/app/api/paypal/webhook/route.ts` (Real-time autonomous PayPal dispute/chargeback reactor)
+  - `scripts/run-sweep.mjs` (CLI and Render workflow cron sweep automation)
+
+### APIMatic Context Plugin
+- **Purpose:** Official sponsor partner plugin providing instant, zero-hallucination PayPal REST v2 API schema context, parameter schemas, and cryptographic verification specs to the Autonomous AI Agent.
+- **Components Used:**
+  - `APIMATIC_PAYPAL_CONTEXT` schema plugin specification
+  - Integrated into AI Agent orchestration prompt pipeline (`src/lib/ai/apimaticContext.ts` and `src/lib/ai/orchestrator.ts`)
+  - Ensures accurate tool calling across Orders v2, Captures, and Refunds with strict idempotency guards.
 
 ### AG Grid Enterprise & Community
 - **Purpose:** High-performance FinTech data virtualization, multi-column sorting, filtering, and interactive tabular UX across merchant transaction ledgers and client invoicing matrices.
@@ -73,6 +88,7 @@ This document provides a transparent and detailed breakdown of every tool, SDK, 
 - **PayPal Developer Platform:** Core sponsor platform powering end-to-end checkout, capture, refund, and webhook verification.
 - **Render:** Production deployment platform hosting containerized Next.js full-stack instance, automated database push/seed workflows, and SSL live endpoints.
 - **AG Grid:** Core sponsor platform actively integrated across primary financial tables (Transactions Ledger and Smart Collections Invoicing) with custom cell renderers and quartz-dark styling.
+- **APIMatic:** Sponsor plugin integrated into AI Agent prompt pipeline providing structured PayPal REST v2 schema context and idempotency rules.
 - **Postman:** Used for API collection testing of PayPal Sandbox endpoints during development.
 
 ---

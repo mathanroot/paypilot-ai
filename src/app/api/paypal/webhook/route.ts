@@ -174,6 +174,25 @@ export async function POST(request: Request) {
         break;
       }
 
+      case "CUSTOMER.DISPUTE.CREATED": {
+        const disputeId = resource.dispute_id || resource.id || "DISPUTE-LIVE";
+        const disputeAmount = parseFloat(resource.dispute_amount?.value || "0");
+        const merchant = await prisma.merchantAccount.findFirst();
+        if (merchant) {
+          await prisma.fraudAlert.create({
+            data: {
+              merchantId: merchant.id,
+              riskScore: 85,
+              riskLevel: "HIGH",
+              reason: `PayPal Customer Dispute filed (Dispute ID: ${disputeId}, Amount: $${disputeAmount.toFixed(2)} USD). Autonomous Reactor engaged.`,
+              recommendedAction: "REVIEW_DISPUTE_EVIDENCE",
+              status: "OPEN",
+            },
+          });
+        }
+        break;
+      }
+
       default:
         console.log(`Webhook received event type: ${eventType}`);
         break;
