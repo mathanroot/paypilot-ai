@@ -157,7 +157,7 @@ Next.js 14 App Router (Full-Stack Gateway)
 ### Quick Setup Steps
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/paypilot-ai.git
+   git clone https://github.com/mathanroot/paypilot-ai.git
    cd paypilot-ai
    ```
 
