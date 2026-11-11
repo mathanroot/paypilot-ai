@@ -64,8 +64,11 @@ export async function runAutonomousFinancialSweep(merchantId: string, actorEmail
             invoiceNumber: inv.invoiceNumber,
             customerEmail: inv.customer.email,
             customerName: inv.customer.name,
+            customerPhone: inv.customer.phone,
             amount: inv.amount,
+            currency: inv.currency || "USD",
             daysOverdue,
+            paymentLink: inv.paymentLink,
           }),
         },
       });

@@ -30,6 +30,7 @@ import {
   Check,
   Copy,
   RefreshCw,
+  MessageCircle,
 } from "lucide-react";
 import FormattedChatMessage from "@/components/FormattedChatMessage";
 
@@ -52,6 +53,7 @@ interface Message {
     badge?: string;
     actionLabel?: string;
     actionUrl?: string;
+    whatsappUrl?: string;
   }>;
   latencyMs?: number;
   timestamp: string;
@@ -705,6 +707,19 @@ export default function AssistantPage() {
                                         <ArrowRight className="w-3 h-3" />
                                       </Link>
                                     )
+                                  )}
+
+                                  {card.whatsappUrl && (
+                                    <a
+                                      href={card.whatsappUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="py-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition shrink-0"
+                                      title="Dispatch direct payment link on WhatsApp"
+                                    >
+                                      <MessageCircle className="w-3.5 h-3.5" />
+                                      <span>WhatsApp</span>
+                                    </a>
                                   )}
 
                                   {card.link && (

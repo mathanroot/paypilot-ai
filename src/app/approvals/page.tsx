@@ -24,7 +24,9 @@ import {
   DollarSign,
   Calendar,
   Layers,
+  MessageCircle,
 } from "lucide-react";
+import { generateWhatsAppReminderUrl } from "@/lib/whatsapp";
 
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<any[]>([]);
@@ -395,7 +397,28 @@ export default function ApprovalsPage() {
                       )}
                     </div>
 
-                    <div className="flex items-center justify-end gap-2.5">
+                    <div className="flex flex-wrap items-center justify-end gap-2.5">
+                      {item.actionType === "SEND_REMINDER" && (
+                        <a
+                          href={generateWhatsAppReminderUrl({
+                            phone: payload.customerPhone || payload.phone,
+                            customerName,
+                            invoiceNumber: invoiceOrOrder,
+                            amount: Number(payload.amount || 0),
+                            currency: payload.currency || "USD",
+                            paymentLink: payload.paymentLink,
+                            daysOverdue: payload.daysOverdue || 14,
+                          })}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5"
+                          title="Open WhatsApp with pre-composed reminder and 1-click PayPal link"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>Send on WhatsApp</span>
+                        </a>
+                      )}
+
                       <button
                         onClick={() => handleDecision(item.id, "REJECT")}
                         disabled={isAnyActionInProgress}

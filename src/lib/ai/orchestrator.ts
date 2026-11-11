@@ -7,6 +7,7 @@ import OpenAI from "openai";
 import { AI_TOOL_DEFINITIONS, executeAITool } from "./tools";
 import { prisma } from "../db";
 import { getAPIMaticPromptContext } from "./apimaticContext";
+import { generateWhatsAppReminderUrl, generateWhatsAppOrderUrl } from "../whatsapp";
 
 function getNvidiaClient(): OpenAI | null {
   const apiKey = process.env.NVIDIA_API_KEY;
@@ -38,6 +39,7 @@ export interface AgentActionCard {
   badge?: string;
   actionLabel?: string;
   actionUrl?: string;
+  whatsappUrl?: string;
 }
 
 export interface AgentExecutionResult {
@@ -56,17 +58,36 @@ export function extractActionCards(toolCalls: Array<{ name: string; args: any; r
   const cards: AgentActionCard[] = [];
   for (const tc of toolCalls) {
     if (tc.name === "create_invoice" && tc.result?.invoice) {
+      const inv = tc.result.invoice;
+      const waUrl = generateWhatsAppReminderUrl({
+        phone: inv.customer?.phone,
+        customerName: inv.customer?.name || "Client",
+        invoiceNumber: inv.invoiceNumber,
+        amount: Number(inv.amount),
+        currency: inv.currency || "USD",
+        paymentLink: inv.paymentLink,
+        daysOverdue: 0,
+      });
+
       cards.push({
         type: "INVOICE",
-        title: `Invoice ${tc.result.invoice.invoiceNumber}`,
-        subtitle: `Client: ${tc.result.invoice.customer?.name || "Client"} • $${Number(tc.result.invoice.amount).toFixed(2)} USD`,
-        amount: Number(tc.result.invoice.amount),
-        currency: tc.result.invoice.currency || "USD",
-        link: tc.result.invoice.paymentLink,
+        title: `Invoice ${inv.invoiceNumber}`,
+        subtitle: `Client: ${inv.customer?.name || "Client"} • $${Number(inv.amount).toFixed(2)} USD`,
+        amount: Number(inv.amount),
+        currency: inv.currency || "USD",
+        link: inv.paymentLink,
         actionLabel: "Pay with PayPal",
-        actionUrl: tc.result.invoice.paymentLink,
+        actionUrl: inv.paymentLink,
+        whatsappUrl: waUrl,
       });
     } else if (tc.name === "create_paypal_order" && tc.result?.orderId) {
+      const waUrl = generateWhatsAppOrderUrl({
+        orderId: tc.result.orderId,
+        amount: Number(tc.result.amount),
+        currency: tc.result.currency || "USD",
+        checkoutUrl: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+      });
+
       cards.push({
         type: "CHECKOUT",
         title: `PayPal Sandbox Order #${tc.result.orderId}`,
@@ -76,6 +97,7 @@ export function extractActionCards(toolCalls: Array<{ name: string; args: any; r
         link: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
         actionLabel: "Open PayPal Checkout",
         actionUrl: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+        whatsappUrl: waUrl,
       });
     } else if (tc.name === "stage_refund" && tc.result?.approvalId) {
       cards.push({
@@ -87,14 +109,24 @@ export function extractActionCards(toolCalls: Array<{ name: string; args: any; r
         actionUrl: "/approvals",
         badge: "PENDING_APPROVAL",
       });
-    } else if (tc.name === "prepare_payment_reminder" && tc.result?.actionId) {
+    } else if (tc.name === "prepare_payment_reminder" && (tc.result?.actionId || tc.result?.approvalId)) {
+      const waUrl = generateWhatsAppReminderUrl({
+        customerName: tc.result.customer || tc.result.customerName || "Client",
+        invoiceNumber: tc.result.invoiceNumber,
+        amount: Number(tc.result.amount || 0),
+        currency: tc.result.currency || "USD",
+        paymentLink: tc.result.paymentLink,
+        daysOverdue: tc.result.daysOverdue || 14,
+      });
+
       cards.push({
         type: "APPROVAL",
         title: `Overdue Collection Notice Prepared`,
-        subtitle: `Target: ${tc.result.customerName || tc.result.invoiceNumber} • Staged for merchant confirmation`,
+        subtitle: `Target: ${tc.result.customer || tc.result.customerName || tc.result.invoiceNumber} • Staged for merchant confirmation`,
         actionLabel: "Authorize in Approval Center",
         actionUrl: "/approvals",
         badge: "HUMAN_GUARD_ACTIVE",
+        whatsappUrl: waUrl,
       });
     } else if (tc.name === "detect_fraud_anomalies" && (tc.result?.openAlertsCount > 0 || tc.result?.anomalies?.length > 0)) {
       cards.push({

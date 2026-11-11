@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -501,7 +502,69 @@ function renderBodyMarkdown(text: string) {
   });
 }
 
-// Inline formatting: handles `code`, **bold**, links [text](url)
+// Grounded Data Citation Badge Renderer
+function renderCitationBadge(id: string, key: any) {
+  const cleanId = id.trim();
+  const isInvoice = /^INV-\d{4}-\d+/i.test(cleanId);
+  const isOrder = /^(ORD-[0-9A-Z]+|[0-9A-Z]{17})$/i.test(cleanId);
+  const isCapture = /^(CAP-[0-9A-Z]+|[0-9A-Z]{17}[A-Z0-9]*)$/i.test(cleanId) && !isOrder;
+
+  if (isInvoice) {
+    return (
+      <Link
+        key={key}
+        href="/invoices"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 font-mono text-[11px] mx-1 transition group shadow-sm"
+        title="View grounded record in Smart Collections"
+      >
+        <Receipt className="w-3 h-3 text-cyan-400 group-hover:scale-110 transition-transform" />
+        <span className="font-semibold">{cleanId}</span>
+        <ExternalLink className="w-2.5 h-2.5 text-cyan-400/80" />
+      </Link>
+    );
+  }
+
+  if (isOrder) {
+    return (
+      <Link
+        key={key}
+        href="/transactions"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-950/70 hover:bg-blue-900 border border-blue-500/40 text-blue-200 font-mono text-[11px] mx-1 transition group shadow-sm"
+        title="Verify live PayPal Sandbox order in Transactions ledger"
+      >
+        <CreditCard className="w-3 h-3 text-blue-400 group-hover:scale-110 transition-transform" />
+        <span className="font-semibold">{cleanId}</span>
+        <ExternalLink className="w-2.5 h-2.5 text-blue-400/80" />
+      </Link>
+    );
+  }
+
+  if (isCapture) {
+    return (
+      <Link
+        key={key}
+        href="/transactions"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-200 font-mono text-[11px] mx-1 transition group shadow-sm"
+        title="Verified cryptographic PayPal settlement capture"
+      >
+        <ShieldCheck className="w-3 h-3 text-emerald-400 group-hover:scale-110 transition-transform" />
+        <span className="font-semibold">{cleanId}</span>
+        <ExternalLink className="w-2.5 h-2.5 text-emerald-400/80" />
+      </Link>
+    );
+  }
+
+  return (
+    <code
+      key={key}
+      className="px-1.5 py-0.5 rounded-md bg-[#050814] border border-surface-border text-cyan-300 font-mono text-[11px] mx-0.5"
+    >
+      {cleanId}
+    </code>
+  );
+}
+
+// Inline formatting: handles `code`, **bold**, links [text](url), and grounded citations
 function renderInlineMarkdown(str: string): React.ReactNode[] {
   // Regex splitting by code tokens, bold tokens, and link tokens
   const tokens = str.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
@@ -511,18 +574,15 @@ function renderInlineMarkdown(str: string): React.ReactNode[] {
 
     if (tok.startsWith("`") && tok.endsWith("`")) {
       const code = tok.slice(1, -1);
-      return (
-        <code
-          key={i}
-          className="px-1.5 py-0.5 rounded-md bg-[#050814] border border-surface-border text-cyan-300 font-mono text-[11px] mx-0.5"
-        >
-          {code}
-        </code>
-      );
+      return renderCitationBadge(code, i);
     }
 
     if (tok.startsWith("**") && tok.endsWith("**")) {
       const text = tok.slice(2, -2);
+      // If bold text matches an order or invoice, make it a citation badge!
+      if (/^(INV-\d{4}-\d+|ORD-[0-9A-Z]+|[0-9A-Z]{17}|CAP-[0-9A-Z]+)$/i.test(text.trim())) {
+        return renderCitationBadge(text.trim(), i);
+      }
       return (
         <strong key={i} className="font-bold text-white">
           {text}
@@ -544,6 +604,21 @@ function renderInlineMarkdown(str: string): React.ReactNode[] {
           <span>{label}</span>
           <ExternalLink className="w-3 h-3" />
         </a>
+      );
+    }
+
+    // Also check for raw unbackticked citations like INV-2026-001 or ORD-9882190A in plain text
+    const subParts = tok.split(/(\b(?:INV-\d{4}-\d+|ORD-[0-9A-Z]{6,10}|[0-9A-Z]{17})\b)/g);
+    if (subParts.length > 1) {
+      return (
+        <React.Fragment key={i}>
+          {subParts.map((sp, spIdx) => {
+            if (/^(INV-\d{4}-\d+|ORD-[0-9A-Z]{6,10}|[0-9A-Z]{17})$/i.test(sp)) {
+              return renderCitationBadge(sp, `${i}-${spIdx}`);
+            }
+            return sp;
+          })}
+        </React.Fragment>
       );
     }
 

@@ -33,6 +33,45 @@ export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [briefing, setBriefing] = useState<any>(null);
+  const [loadingBriefing, setLoadingBriefing] = useState(true);
+  const [resolving, setResolving] = useState(false);
+  const [resolveFeedback, setResolveFeedback] = useState<string | null>(null);
+
+  const fetchBriefing = async () => {
+    try {
+      setLoadingBriefing(true);
+      const res = await fetch("/api/ai/briefing");
+      const json = await res.json();
+      if (json.success) {
+        setBriefing(json);
+      }
+    } catch (e) {
+      console.warn("Failed to load AI briefing", e);
+    } finally {
+      setLoadingBriefing(false);
+    }
+  };
+
+  const handleAutoResolve = async () => {
+    try {
+      setResolving(true);
+      setResolveFeedback(null);
+      const res = await fetch("/api/ai/sweep", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Auto-resolve failed");
+      const sweep = json.sweep;
+      setResolveFeedback(
+        `✅ Autonomous Resolution Complete: ${sweep.remindersStaged} overdue collection reminder${sweep.remindersStaged === 1 ? "" : "s"} staged in Human Approval Center.`
+      );
+      fetchAnalytics(filter);
+      fetchBriefing();
+    } catch (err: any) {
+      alert("Auto-resolve error: " + err.message);
+    } finally {
+      setResolving(false);
+    }
+  };
 
   const fetchAnalytics = async (selectedFilter: string) => {
     try {
@@ -63,6 +102,7 @@ export default function DashboardPage() {
       }
     } catch {}
     fetchAnalytics(filter);
+    fetchBriefing();
   }, [filter]);
 
   const kpis = mounted ? data?.kpis : null;
@@ -107,6 +147,67 @@ export default function DashboardPage() {
                 {t === "7d" ? "7 Days" : t === "30d" ? "30 Days" : t === "90d" ? "90 Days" : "Today"}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Proactive Live AI Executive Operations Briefing Banner */}
+        <div className="relative overflow-hidden rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-[#0C152E]/95 via-[#091024]/95 to-[#0F1B3B]/95 p-5 shadow-xl shadow-cyan-950/20 backdrop-blur-md">
+          {/* Subtle Ambient Glow */}
+          <div className="absolute -top-12 -right-12 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/25 mt-0.5">
+                <Bot className="w-5 h-5 text-white" />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-mono flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                    <span>Live AI Executive Operations Briefing</span>
+                  </span>
+                  {briefing?.timestamp && (
+                    <span className="text-[10px] font-mono text-slate-500">
+                      Synchronized {briefing.timestamp}
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-medium">
+                  {loadingBriefing ? (
+                    <span className="flex items-center gap-2 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                      Analyzing live PayPal sandbox ledger &amp; receivables...
+                    </span>
+                  ) : resolveFeedback ? (
+                    <span className="text-emerald-300 font-semibold">{resolveFeedback}</span>
+                  ) : (
+                    briefing?.briefing || "All systems verified optimal."
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0">
+              <button
+                onClick={handleAutoResolve}
+                disabled={resolving || loadingBriefing}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:brightness-110 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center gap-2 disabled:opacity-50 active:scale-95"
+                title="Execute live autonomous sweep: stage collection reminders & verify risks"
+              >
+                <Sparkles className={`w-3.5 h-3.5 text-cyan-200 ${resolving ? "animate-spin" : ""}`} />
+                <span>{resolving ? "Resolving Live..." : "Auto-Resolve via AI"}</span>
+              </button>
+
+              <Link
+                href="/assistant"
+                className="px-3.5 py-2 rounded-xl bg-surface-card hover:bg-white/10 border border-surface-border text-slate-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5"
+              >
+                <span>Ask Operator</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
         </div>
 
