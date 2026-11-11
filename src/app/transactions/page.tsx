@@ -1,8 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import Link from "next/link";
+import { AgGridReact } from "ag-grid-react";
+import { ModuleRegistry, AllCommunityModule, ColDef } from "ag-grid-community";
+import { paypilotGridTheme } from "@/lib/agGridTheme";
 import {
   Receipt,
   Search,
@@ -28,14 +31,19 @@ import {
   Sparkles,
   Activity,
   User,
+  Grid,
 } from "lucide-react";
 import { exportToExcel, exportToCsv } from "@/lib/exportUtils";
+
+// Register AG Grid Community Modules
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [viewMode, setViewMode] = useState<"ag-grid" | "classic">("ag-grid");
   const [selectedTx, setSelectedTx] = useState<any | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -49,6 +57,175 @@ export default function TransactionsPage() {
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };
+
+  const defaultColDef = useMemo<ColDef>(
+    () => ({
+      sortable: true,
+      filter: true,
+      resizable: true,
+      cellStyle: { display: "flex", alignItems: "center" },
+    }),
+    []
+  );
+
+  const columnDefs = useMemo<ColDef[]>(
+    () => [
+      {
+        headerName: "PayPal Order ID",
+        field: "paypalOrderId",
+        minWidth: 175,
+        flex: 1.1,
+        cellRenderer: (params: any) => (
+          <span className="font-mono font-medium text-cyan-300">
+            {params.value}
+          </span>
+        ),
+      },
+      {
+        headerName: "Capture ID",
+        field: "paypalCaptureId",
+        minWidth: 145,
+        flex: 1,
+        cellRenderer: (params: any) => (
+          <span className="font-mono text-slate-400">
+            {params.value || "—"}
+          </span>
+        ),
+      },
+      {
+        headerName: "Customer / Memo",
+        field: "customer.name",
+        minWidth: 200,
+        flex: 1.4,
+        cellRenderer: (params: any) => {
+          const t = params.data;
+          if (!t) return null;
+          return (
+            <div className="py-1">
+              <div className="font-semibold text-white leading-tight">
+                {t.customer?.name || "Direct Checkout"}
+              </div>
+              <div className="text-[11px] text-slate-400 truncate max-w-xs leading-tight">
+                {t.description || "Invoice Payment"}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Amount",
+        field: "amount",
+        minWidth: 165,
+        flex: 1.1,
+        cellRenderer: (params: any) => {
+          const t = params.data;
+          if (!t) return null;
+          const orig = Number(t.original_amount ?? t.amount).toFixed(2);
+          const ref = Number(t.total_refunded || 0).toFixed(2);
+          const rem = Number(t.remaining_balance ?? 0).toFixed(2);
+          const isPartial =
+            t.status === "PARTIALLY_REFUNDED" ||
+            ((t.total_refunded || 0) > 0 && (t.total_refunded || 0) < Number(t.original_amount ?? t.amount));
+          return (
+            <div className="py-1">
+              <div className="font-bold text-white leading-tight">
+                ${orig} {t.currency || "USD"}
+              </div>
+              {isPartial && (
+                <div className="text-[10px] space-y-0.5 font-mono leading-tight mt-0.5">
+                  <div className="text-amber-400 font-medium">Refunded: ${ref}</div>
+                  <div className="text-emerald-400 font-medium">Remaining: ${rem}</div>
+                </div>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Status",
+        field: "status",
+        minWidth: 155,
+        flex: 1,
+        cellRenderer: (params: any) => {
+          const status = params.value;
+          const colorClass =
+            status === "COMPLETED"
+              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/20"
+              : status === "PARTIALLY_REFUNDED"
+              ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
+              : status === "REFUNDED"
+              ? "bg-purple-500/15 text-purple-400 border-purple-500/20"
+              : "bg-cyan-500/15 text-cyan-400 border-cyan-500/20";
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${colorClass}`}>
+              {status}
+            </span>
+          );
+        },
+      },
+      {
+        headerName: "Risk Score",
+        field: "riskScore",
+        minWidth: 105,
+        flex: 0.8,
+        cellRenderer: (params: any) => (
+          <span className="font-mono text-xs">
+            {params.value || 5}/100
+          </span>
+        ),
+      },
+      {
+        headerName: "Action",
+        minWidth: 180,
+        flex: 1.2,
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: any) => {
+          const t = params.data;
+          if (!t) return null;
+          return (
+            <div className="flex items-center gap-1.5 h-full">
+              {t.status === "CREATED" && (
+                <>
+                  <a
+                    href={`https://www.sandbox.paypal.com/checkoutnow?token=${t.paypalOrderId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white text-[11px] font-semibold transition-all flex items-center gap-1 shadow-sm"
+                    title="Resume PayPal Checkout to complete order"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Pay</span>
+                  </a>
+                  <button
+                    onClick={() => handleSyncOrder(t.paypalOrderId)}
+                    disabled={syncingId === t.paypalOrderId}
+                    className="px-2 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-[11px] font-medium transition-colors flex items-center gap-1 disabled:opacity-50"
+                    title="Check PayPal live status and capture if approved"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingId === t.paypalOrderId ? "animate-spin" : ""}`} />
+                    <span>Sync</span>
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => {
+                  setSelectedTx(t);
+                  setModalTab("overview");
+                  setSyncFeedback(null);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-surface/90 border border-surface-border text-slate-200 hover:text-white hover:border-primary/60 hover:bg-surface-border/50 text-[11px] font-semibold transition-all flex items-center gap-1 shadow-sm"
+              >
+                <Receipt className="w-3 h-3 text-cyan-400" />
+                <span>Inspect</span>
+              </button>
+            </div>
+          );
+        },
+      },
+    ],
+    [syncingId]
+  );
 
   const handleExportLedger = (type: "excel" | "csv") => {
     const tableData = transactions.map((t) => ({
@@ -182,14 +359,17 @@ export default function TransactionsPage() {
         {/* Title */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-surface-border">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold tracking-tight text-white flex flex-wrap items-center gap-2.5">
               <span>Transaction Management</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-indigo-300 font-mono">
                 Ledger v2
               </span>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono flex items-center gap-1 border border-emerald-500/30">
+                <Sparkles className="w-3 h-3 text-emerald-400" /> Powered by AG Grid
+              </span>
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              PayPal Order &amp; Capture IDs, settlement verification, and lifecycle auditing.
+              PayPal Order &amp; Capture IDs, AG Grid data matrix, settlement verification, and lifecycle auditing.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
@@ -239,7 +419,7 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        {/* Filter & Search Bar */}
+        {/* Filter, Search & View Switcher Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <form onSubmit={handleSearchSubmit} className="relative w-full sm:w-80">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -252,131 +432,209 @@ export default function TransactionsPage() {
             />
           </form>
 
-          <div className="flex items-center gap-1.5 p-1 bg-surface-card border border-surface-border rounded-xl w-full sm:w-auto overflow-x-auto">
-            {[
-              { id: "ALL", label: "All Statuses" },
-              { id: "COMPLETED", label: "Completed" },
-              { id: "PARTIALLY_REFUNDED", label: "Partially Refunded" },
-              { id: "REFUNDED", label: "Refunded" },
-              { id: "CREATED", label: "Created" },
-            ].map(({ id, label }) => (
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+            {/* View Mode Toggle: AG Grid vs Classic */}
+            <div className="flex items-center gap-1 p-1 bg-surface-card border border-surface-border rounded-xl">
               <button
-                key={id}
-                onClick={() => setStatusFilter(id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                  statusFilter === id
-                    ? "bg-primary text-white"
+                type="button"
+                onClick={() => setViewMode("ag-grid")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  viewMode === "ag-grid"
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
+                title="Switch to AG Grid interactive data matrix"
               >
-                {label}
+                <Grid className="w-3.5 h-3.5" />
+                <span>AG Grid View</span>
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => setViewMode("classic")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  viewMode === "classic"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+                title="Switch to Classic HTML table"
+              >
+                Classic
+              </button>
+            </div>
+
+            {/* Status Filter Buttons */}
+            <div className="flex items-center gap-1.5 p-1 bg-surface-card border border-surface-border rounded-xl overflow-x-auto">
+              {[
+                { id: "ALL", label: "All Statuses" },
+                { id: "COMPLETED", label: "Completed" },
+                { id: "PARTIALLY_REFUNDED", label: "Partially Refunded" },
+                { id: "REFUNDED", label: "Refunded" },
+                { id: "CREATED", label: "Created" },
+              ].map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setStatusFilter(id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                    statusFilter === id
+                      ? "bg-primary text-white"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Transactions Table */}
-        <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#0A0F1F] text-slate-400 border-b border-surface-border uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-3.5 px-4 font-semibold">PayPal Order ID</th>
-                  <th className="py-3.5 px-4 font-semibold">Capture ID</th>
-                  <th className="py-3.5 px-4 font-semibold">Customer / Memo</th>
-                  <th className="py-3.5 px-4 font-semibold">Amount</th>
-                  <th className="py-3.5 px-4 font-semibold">Status</th>
-                  <th className="py-3.5 px-4 font-semibold">Risk Score</th>
-                  <th className="py-3.5 px-4 font-semibold text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-border/50 text-slate-200">
-                {transactions.length === 0 ? (
+        {/* Transactions Table: AG Grid Mode vs Classic Mode */}
+        {viewMode === "ag-grid" ? (
+          <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden p-3 shadow-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between px-3 py-2 border-b border-surface-border/50 text-xs mb-3 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Grid className="w-4 h-4 text-emerald-400" />
+                  AG Grid FinTech Ledger
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-mono flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-emerald-400" /> Sorting • Filtering • Resizing Enabled
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Click headers to sort • Drag column dividers to resize • Instant client-side virtualization
+              </span>
+            </div>
+            <div className="ag-theme-quartz-dark w-full">
+              <AgGridReact
+                theme={paypilotGridTheme}
+                rowData={transactions}
+                columnDefs={columnDefs}
+                defaultColDef={defaultColDef}
+                domLayout="autoHeight"
+                rowHeight={60}
+                headerHeight={46}
+                pagination={true}
+                paginationPageSize={10}
+                paginationPageSizeSelector={[10, 20, 50]}
+                quickFilterText={search}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#0A0F1F] text-slate-400 border-b border-surface-border uppercase tracking-wider text-[10px]">
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500">
-                      {loading ? "Loading transactions..." : "No matching transactions found."}
-                    </td>
+                    <th className="py-3.5 px-4 font-semibold">PayPal Order ID</th>
+                    <th className="py-3.5 px-4 font-semibold">Capture ID</th>
+                    <th className="py-3.5 px-4 font-semibold">Customer / Memo</th>
+                    <th className="py-3.5 px-4 font-semibold">Amount</th>
+                    <th className="py-3.5 px-4 font-semibold">Status</th>
+                    <th className="py-3.5 px-4 font-semibold">Risk Score</th>
+                    <th className="py-3.5 px-4 font-semibold text-right">Action</th>
                   </tr>
-                ) : (
-                  transactions.map((t) => (
-                    <tr key={t.id} className="hover:bg-surface/50 transition-colors">
-                      <td className="py-3.5 px-4 font-mono font-medium text-cyan-300">
-                        {t.paypalOrderId}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono text-slate-400">
-                        {t.paypalCaptureId || "—"}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-white">
-                          {t.customer?.name || "Direct Checkout"}
-                        </div>
-                        <div className="text-[11px] text-slate-400 truncate max-w-xs">
-                          {t.description || "Invoice Payment"}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-white">
-                          ${Number(t.original_amount ?? t.amount).toFixed(2)} {t.currency}
-                        </div>
-                        {(t.status === "PARTIALLY_REFUNDED" || ((t.total_refunded || 0) > 0 && (t.total_refunded || 0) < Number(t.original_amount ?? t.amount))) && (
-                          <div className="text-[10px] mt-0.5 space-y-0.5 font-mono">
-                            <div className="text-amber-400 font-medium">Refunded: ${Number(t.total_refunded || 0).toFixed(2)}</div>
-                            <div className="text-emerald-400 font-medium">Remaining: ${Number(t.remaining_balance ?? 0).toFixed(2)}</div>
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            t.status === "COMPLETED"
-                              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-                              : t.status === "PARTIALLY_REFUNDED"
-                              ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
-                              : t.status === "REFUNDED"
-                              ? "bg-purple-500/15 text-purple-400 border border-purple-500/20"
-                              : "bg-cyan-500/15 text-cyan-400 border border-cyan-500/20"
-                          }`}
-                        >
-                          {t.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="font-mono text-xs">
-                          {t.riskScore || 5}/100
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {t.status === "CREATED" && (
-                            <button
-                              onClick={() => handleSyncOrder(t.paypalOrderId)}
-                              disabled={syncingId === t.paypalOrderId}
-                              className="px-2.5 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-[11px] font-medium transition-colors flex items-center gap-1 disabled:opacity-50"
-                              title="Check PayPal live status and capture if approved"
-                            >
-                              <RefreshCw className={`w-3 h-3 ${syncingId === t.paypalOrderId ? "animate-spin" : ""}`} />
-                              <span>Sync &amp; Capture</span>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setSelectedTx(t);
-                              setModalTab("overview");
-                              setSyncFeedback(null);
-                            }}
-                            className="px-2.5 py-1 rounded-md bg-surface border border-surface-border text-slate-300 hover:text-white hover:border-primary/50 text-[11px] font-medium transition-colors"
-                          >
-                            Inspect
-                          </button>
-                        </div>
+                </thead>
+                <tbody className="divide-y divide-surface-border/50 text-slate-200">
+                  {transactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-500">
+                        {loading ? "Loading transactions..." : "No matching transactions found."}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    transactions.map((t) => (
+                      <tr key={t.id} className="hover:bg-surface/50 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-medium text-cyan-300">
+                          {t.paypalOrderId}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-slate-400">
+                          {t.paypalCaptureId || "—"}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-white">
+                            {t.customer?.name || "Direct Checkout"}
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate max-w-xs">
+                            {t.description || "Invoice Payment"}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-white">
+                            ${Number(t.original_amount ?? t.amount).toFixed(2)} {t.currency}
+                          </div>
+                          {(t.status === "PARTIALLY_REFUNDED" || ((t.total_refunded || 0) > 0 && (t.total_refunded || 0) < Number(t.original_amount ?? t.amount))) && (
+                            <div className="text-[10px] mt-0.5 space-y-0.5 font-mono">
+                              <div className="text-amber-400 font-medium">Refunded: ${Number(t.total_refunded || 0).toFixed(2)}</div>
+                              <div className="text-emerald-400 font-medium">Remaining: ${Number(t.remaining_balance ?? 0).toFixed(2)}</div>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              t.status === "COMPLETED"
+                                ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                                : t.status === "PARTIALLY_REFUNDED"
+                                ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                                : t.status === "REFUNDED"
+                                ? "bg-purple-500/15 text-purple-400 border border-purple-500/20"
+                                : "bg-cyan-500/15 text-cyan-400 border border-cyan-500/20"
+                            }`}
+                          >
+                            {t.status}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="font-mono text-xs">
+                            {t.riskScore || 5}/100
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {t.status === "CREATED" && (
+                              <>
+                                <a
+                                  href={`https://www.sandbox.paypal.com/checkoutnow?token=${t.paypalOrderId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1 rounded-md bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white text-[11px] font-semibold transition-all flex items-center gap-1 shadow-sm"
+                                  title="Resume PayPal Checkout to complete order"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>Pay</span>
+                                </a>
+                                <button
+                                  onClick={() => handleSyncOrder(t.paypalOrderId)}
+                                  disabled={syncingId === t.paypalOrderId}
+                                  className="px-2.5 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-[11px] font-medium transition-colors flex items-center gap-1 disabled:opacity-50"
+                                  title="Check PayPal live status and capture if approved"
+                                >
+                                  <RefreshCw className={`w-3 h-3 ${syncingId === t.paypalOrderId ? "animate-spin" : ""}`} />
+                                  <span>Sync &amp; Capture</span>
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => {
+                                setSelectedTx(t);
+                                setModalTab("overview");
+                                setSyncFeedback(null);
+                              }}
+                              className="px-2.5 py-1 rounded-md bg-surface border border-surface-border text-slate-300 hover:text-white hover:border-primary/50 text-[11px] font-medium transition-colors"
+                            >
+                              Inspect
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Transaction Detail Modal - Enterprise FinTech Deployment Standard */}
         {selectedTx && (
@@ -878,14 +1136,26 @@ Date: ${new Date(selectedTx.createdAt).toLocaleString()}`,
 
                 <div className="flex items-center gap-2">
                   {selectedTx.status === "CREATED" && (
-                    <button
-                      onClick={() => handleSyncOrder(selectedTx.paypalOrderId)}
-                      disabled={syncingId === selectedTx.paypalOrderId}
-                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${syncingId === selectedTx.paypalOrderId ? "animate-spin" : ""}`} />
-                      <span>Sync &amp; Capture via PayPal</span>
-                    </button>
+                    <>
+                      <a
+                        href={`https://www.sandbox.paypal.com/checkoutnow?token=${selectedTx.paypalOrderId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white text-xs font-semibold transition-all flex items-center gap-1.5 shadow-lg shadow-blue-500/20"
+                        title="Open PayPal Sandbox to complete purchase"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Pay on PayPal Sandbox &rarr;</span>
+                      </a>
+                      <button
+                        onClick={() => handleSyncOrder(selectedTx.paypalOrderId)}
+                        disabled={syncingId === selectedTx.paypalOrderId}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${syncingId === selectedTx.paypalOrderId ? "animate-spin" : ""}`} />
+                        <span>Sync &amp; Capture</span>
+                      </button>
+                    </>
                   )}
 
                   {(selectedTx.status === "COMPLETED" || selectedTx.status === "PARTIALLY_REFUNDED") &&

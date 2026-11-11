@@ -163,8 +163,12 @@ export async function createPayPalOrder(params: CreateOrderParams) {
       brand_name: "PayPilot AI",
       landing_page: "NO_PREFERENCE",
       user_action: "PAY_NOW",
-      return_url: params.returnUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=success`,
-      cancel_url: params.cancelUrl || `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=cancel`,
+      return_url:
+        params.returnUrl ||
+        `${process.env.RENDER_EXTERNAL_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=success`,
+      cancel_url:
+        params.cancelUrl ||
+        `${process.env.RENDER_EXTERNAL_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout?status=cancel`,
     },
     payer: params.customerEmail ? { email_address: params.customerEmail } : undefined,
   };

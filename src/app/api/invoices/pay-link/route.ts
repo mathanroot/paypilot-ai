@@ -71,12 +71,24 @@ export async function POST(request: Request) {
       });
     }
 
+    // Dynamically derive current origin from request headers so return_url is always 100% accurate on Render or local
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const proto = request.headers.get("x-forwarded-proto") || "https";
+    const origin =
+      request.headers.get("origin") ||
+      (host ? `${proto}://${host}` : null) ||
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3000";
+
     // Otherwise, generate a brand-new active PayPal Sandbox Order
     const order = await createPayPalOrder({
       amount: invoice.amount,
       currency: invoice.currency || "USD",
       description: `Invoice ${invoice.invoiceNumber} - ${invoice.customer.name}`,
       customerEmail: invoice.customer.email,
+      returnUrl: `${origin}/checkout?status=success`,
+      cancelUrl: `${origin}/checkout?status=cancel`,
     });
 
     const approveLink =

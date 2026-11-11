@@ -29,11 +29,23 @@ export async function POST(request: Request) {
 
     const { amount, currency, description, customerId } = parsed.data;
 
+    // Dynamically derive current origin from request headers so return_url is always 100% accurate on Render or local
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const proto = request.headers.get("x-forwarded-proto") || "https";
+    const origin =
+      request.headers.get("origin") ||
+      (host ? `${proto}://${host}` : null) ||
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3000";
+
     // Call official PayPal Orders v2 API with chosen currency and amount
     const order = await createPayPalOrder({
       amount,
       currency,
       description: description || `PayPilot AI Invoice Checkout (${currency} ${amount.toFixed(2)})`,
+      returnUrl: `${origin}/checkout?status=success`,
+      cancelUrl: `${origin}/checkout?status=cancel`,
     });
 
     // Persist Payment record in database with the exact requested currency

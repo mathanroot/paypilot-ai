@@ -1,8 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import Link from "next/link";
+import { AgGridReact } from "ag-grid-react";
+import { ModuleRegistry, AllCommunityModule, ColDef } from "ag-grid-community";
+import { paypilotGridTheme } from "@/lib/agGridTheme";
 import {
   FileText,
   AlertTriangle,
@@ -22,12 +25,16 @@ import {
   Receipt,
   X,
   RefreshCw,
+  Grid,
 } from "lucide-react";
+
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<"ag-grid" | "classic">("ag-grid");
   const [remindingId, setRemindingId] = useState<string | null>(null);
   const [openingLinkId, setOpeningLinkId] = useState<string | null>(null);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
@@ -242,20 +249,190 @@ export default function InvoicesPage() {
     .reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const unpaidCount = invoices.filter((i) => i.status !== "PAID").length;
 
+  const defaultColDef = useMemo<ColDef>(
+    () => ({
+      sortable: true,
+      filter: true,
+      resizable: true,
+      cellStyle: { display: "flex", alignItems: "center" },
+    }),
+    []
+  );
+
+  const columnDefs = useMemo<ColDef[]>(
+    () => [
+      {
+        headerName: "Invoice Number",
+        field: "invoiceNumber",
+        minWidth: 160,
+        flex: 1.1,
+        cellRenderer: (params: any) => (
+          <span className="font-mono font-medium text-cyan-300">
+            {params.value}
+          </span>
+        ),
+      },
+      {
+        headerName: "Client / Company",
+        field: "customer.name",
+        minWidth: 190,
+        flex: 1.3,
+        cellRenderer: (params: any) => {
+          const inv = params.data;
+          if (!inv) return null;
+          return (
+            <div className="py-1">
+              <div className="font-semibold text-white leading-tight">{inv.customer?.name}</div>
+              <div className="text-[11px] text-slate-400 leading-tight">{inv.customer?.company}</div>
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Amount",
+        field: "amount",
+        minWidth: 140,
+        flex: 1,
+        cellRenderer: (params: any) => (
+          <span className="font-bold text-white">
+            ${Number(params.value).toFixed(2)} {params.data?.currency || "USD"}
+          </span>
+        ),
+      },
+      {
+        headerName: "Due Date",
+        field: "dueDate",
+        minWidth: 140,
+        flex: 1,
+        cellRenderer: (params: any) => {
+          const inv = params.data;
+          if (!inv) return null;
+          return (
+            <span
+              className={
+                inv.status === "OVERDUE"
+                  ? "text-rose-400 font-semibold flex items-center gap-1"
+                  : "text-slate-300"
+              }
+            >
+              {inv.status === "OVERDUE" && <Clock className="w-3 h-3 text-rose-400 shrink-0" />}
+              <span>{new Date(inv.dueDate).toLocaleDateString()}</span>
+            </span>
+          );
+        },
+      },
+      {
+        headerName: "Status",
+        field: "status",
+        minWidth: 130,
+        flex: 0.9,
+        cellRenderer: (params: any) => {
+          const status = params.value;
+          const colorClass =
+            status === "PAID"
+              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+              : status === "OVERDUE"
+              ? "bg-rose-500/15 text-rose-400 border border-rose-500/20"
+              : "bg-amber-500/15 text-amber-400 border border-amber-500/20";
+          return (
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${colorClass}`}>
+              {status === "PAID" ? "SETTLED" : status}
+            </span>
+          );
+        },
+      },
+      {
+        headerName: "Reminders",
+        field: "reminderCount",
+        minWidth: 110,
+        flex: 0.8,
+        cellRenderer: (params: any) => (
+          <span className="font-mono text-slate-400">
+            {params.value || 0} sent
+          </span>
+        ),
+      },
+      {
+        headerName: "PayPal Checkout & Action",
+        minWidth: 230,
+        flex: 1.6,
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: any) => {
+          const inv = params.data;
+          if (!inv) return null;
+          if (inv.status === "PAID") {
+            return (
+              <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-[11px] h-full">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Settled &amp; Verified</span>
+              </div>
+            );
+          }
+          return (
+            <div className="flex items-center gap-1.5 h-full">
+              {inv.status === "OVERDUE" && (
+                <button
+                  onClick={() => handlePrepareReminder(inv)}
+                  disabled={remindingId === inv.id}
+                  className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-accent-purple to-indigo-600 hover:opacity-95 text-white text-[11px] font-semibold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                  title="Draft personalized AI reminder email"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>{remindingId === inv.id ? "Drafting..." : "AI Reminder"}</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => handleOpenPayLink(inv)}
+                disabled={openingLinkId === inv.id}
+                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white text-[11px] font-semibold shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
+                title="Open authentic PayPal Sandbox Checkout order"
+              >
+                {openingLinkId === inv.id ? (
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                ) : (
+                  <ExternalLink className="w-3 h-3" />
+                )}
+                <span>Pay with PayPal</span>
+              </button>
+
+              <button
+                onClick={(e) => handleCopyLink(inv, e)}
+                className="p-1.5 rounded-lg bg-surface hover:bg-surface-border border border-surface-border text-slate-300 hover:text-white transition-colors"
+                title="Copy 1-Click PayPal Checkout URL"
+              >
+                {copiedId === inv.id ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+          );
+        },
+      },
+    ],
+    [remindingId, openingLinkId, copiedId]
+  );
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         {/* Top Header Banner */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-surface-border">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold tracking-tight text-white flex flex-wrap items-center gap-2.5">
               <span>Smart Collections &amp; Invoices</span>
               <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-accent-purple/20 text-purple-300 font-mono border border-accent-purple/30">
                 PayPal Orders v2 Linked
               </span>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono flex items-center gap-1 border border-emerald-500/30">
+                <Sparkles className="w-3 h-3 text-emerald-400" /> Powered by AG Grid
+              </span>
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Autonomous overdue invoice recovery, personalized reminder drafting, and verified 1-click PayPal checkout links.
+              Autonomous overdue invoice recovery, AG Grid data matrix, personalized reminder drafting, and verified 1-click PayPal checkout links.
             </p>
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -339,25 +516,85 @@ export default function InvoicesPage() {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 p-1 bg-surface-card border border-surface-border rounded-xl w-full sm:w-auto overflow-x-auto">
-            {["ALL", "OVERDUE", "UNPAID", "PAID"].map((s) => (
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-1.5 p-1 bg-surface-card border border-surface-border rounded-xl w-full sm:w-auto overflow-x-auto">
+              {["ALL", "OVERDUE", "UNPAID", "PAID"].map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                    statusFilter === s
+                      ? "bg-primary text-white shadow-sm"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {s === "ALL" ? "All Invoices" : s === "PAID" ? "Settled" : s}
+                </button>
+              ))}
+            </div>
+
+            {/* View Switcher: AG Grid vs Classic */}
+            <div className="flex items-center gap-1 p-1 bg-surface-card border border-surface-border rounded-xl">
               <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                  statusFilter === s
-                    ? "bg-primary text-white shadow-sm"
+                onClick={() => setViewMode("ag-grid")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  viewMode === "ag-grid"
+                    ? "bg-gradient-to-r from-emerald-600 to-cyan-600 text-white shadow-md shadow-emerald-500/10"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
-                {s === "ALL" ? "All Invoices" : s === "PAID" ? "Settled" : s}
+                <Grid className="w-3.5 h-3.5" />
+                <span>AG Grid View</span>
               </button>
-            ))}
+              <button
+                onClick={() => setViewMode("classic")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  viewMode === "classic"
+                    ? "bg-primary text-white shadow-md"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Classic View</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Invoices Table Card */}
-        <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden">
+        {/* Table View: AG Grid Enterprise Matrix vs Classic View */}
+        {viewMode === "ag-grid" ? (
+          <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden p-3 shadow-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between px-3 py-2 border-b border-surface-border/50 text-xs mb-3 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Grid className="w-4 h-4 text-emerald-400" />
+                  AG Grid Smart Collections Matrix
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-mono flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-emerald-400" /> Sorting &amp; Filtering Active
+                </span>
+              </div>
+              <div className="text-slate-400 text-[11px] font-mono">
+                Showing {filteredInvoices.length} invoices • Powered by AG Grid Community
+              </div>
+            </div>
+            <div className="ag-theme-quartz-dark w-full">
+              <AgGridReact
+                theme={paypilotGridTheme}
+                rowData={filteredInvoices}
+                columnDefs={columnDefs}
+                defaultColDef={defaultColDef}
+                domLayout="autoHeight"
+                rowHeight={60}
+                headerHeight={46}
+                pagination={true}
+                paginationPageSize={10}
+                paginationPageSizeSelector={[10, 20, 50]}
+                quickFilterText={search}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-surface-card border border-surface-border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-[#0A0F1F] text-slate-400 border-b border-surface-border uppercase tracking-wider text-[10px]">
@@ -478,6 +715,7 @@ export default function InvoicesPage() {
             </table>
           </div>
         </div>
+      )}
 
         {/* Create Invoice Modal */}
         {createModalOpen && (

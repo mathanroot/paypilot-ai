@@ -184,6 +184,17 @@ export const AI_TOOL_DEFINITIONS = [
   {
     type: "function" as const,
     function: {
+      name: "run_autonomous_sweep",
+      description: "Execute an autonomous financial audit sweep across overdue receivables, pending checkout orders, and fraud anomalies, staging collection reminders and safety actions in the Approval Center.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "get_customer_payment_history",
       description: "Inspect customer lifetime value, historical PayPal settlements, and overdue invoice track record.",
       parameters: {
@@ -954,6 +965,12 @@ export async function executeAITool(
           "Anomaly detection prevented $2,800.00 in suspicious velocity checkout risk.",
         ],
       };
+    }
+
+    case "run_autonomous_sweep": {
+      const { runAutonomousFinancialSweep } = await import("./sweep");
+      const sweep = await runAutonomousFinancialSweep(merchantId, ctx.actorEmail);
+      return sweep;
     }
 
     case "get_customer_payment_history": {
