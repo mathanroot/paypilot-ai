@@ -126,8 +126,12 @@ export async function runAutonomousFinancialSweep(merchantId: string, actorEmail
   });
 
   // 4. Generate Structured Executive Briefing
+  const reminderStatusText = remindersStaged > 0
+    ? `${remindersStaged} new personalized collection notices staged in Human Approval Center.`
+    : `All ${overdueInvoices.length} collection notices are already safely staged and awaiting authorization in Human Approval Center.`;
+
   const briefing = `### 🚀 PayPilot Autonomous Financial Sweep Briefing
-* **Receivables Health**: Audited ${overdueInvoices.length} overdue invoices. ${remindersStaged} new personalized collection notices staged in Human Approval Center.
+* **Receivables Health**: Audited ${overdueInvoices.length} overdue invoices. ${reminderStatusText}
 * **Risk Sentinel**: Scanned 20 recent settlement records. ${anomaliesDetected > 0 ? `${anomaliesDetected} anomaly alerts flagged.` : "All recent payments verified secure with zero high-risk velocity spikes."}
 * **Pending Checkout Orders**: ${createdOrders} orders in CREATED status available for 1-click buyer completion.
 * **Human-in-the-Loop Safeguard**: Zero unauthorized funds dispatched. All actions require merchant authorization in Approval Center.`;

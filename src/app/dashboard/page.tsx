@@ -61,9 +61,15 @@ export default function DashboardPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Auto-resolve failed");
       const sweep = json.sweep;
-      setResolveFeedback(
-        `✅ Autonomous Resolution Complete: ${sweep.remindersStaged} overdue collection reminder${sweep.remindersStaged === 1 ? "" : "s"} staged in Human Approval Center.`
-      );
+      if (sweep.remindersStaged > 0) {
+        setResolveFeedback(
+          `✅ Autonomous Resolution Complete: ${sweep.remindersStaged} new overdue collection reminder${sweep.remindersStaged === 1 ? "" : "s"} staged in Human Approval Center.`
+        );
+      } else {
+        setResolveFeedback(
+          `✅ Audit Complete: All overdue collection notices are already staged and awaiting your decision in the Human Approval Center!`
+        );
+      }
       fetchAnalytics(filter);
       fetchBriefing();
     } catch (err: any) {

@@ -48,7 +48,9 @@ export async function GET() {
     let briefingText = "";
     const needsAction = overdueCount > 0 || pendingOrdersCount > 0 || pendingApprovalsCount > 0;
 
-    if (overdueCount > 0 && pendingOrdersCount > 0) {
+    if (pendingApprovalsCount > 0 && overdueCount > 0) {
+      briefingText = `${greeting}! ${overdueCount} overdue invoice${overdueCount > 1 ? "s" : ""} ($${overdueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) detected — ${pendingApprovalsCount} collection notice${pendingApprovalsCount > 1 ? "s are" : " is"} staged in Human Approval Center. ${pendingOrdersCount} PayPal checkout order${pendingOrdersCount > 1 ? "s are" : " is"} pending completion. Risk Sentinel: ${maxRisk}/100 (${riskStatus}).`;
+    } else if (overdueCount > 0 && pendingOrdersCount > 0) {
       briefingText = `${greeting}! ${overdueCount} overdue invoice${overdueCount > 1 ? "s" : ""} ($${overdueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) require collection attention, ${pendingOrdersCount} PayPal checkout order${pendingOrdersCount > 1 ? "s are" : " is"} pending completion, and Risk Sentinel score is ${maxRisk}/100 (${riskStatus}). Click 'Auto-Resolve via AI' to prepare actions.`;
     } else if (overdueCount > 0) {
       briefingText = `${greeting}! ${overdueCount} overdue invoice${overdueCount > 1 ? "s" : ""} totaling $${overdueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} require attention. Risk Sentinel is verified ${riskStatus} (${maxRisk}/100). Click 'Auto-Resolve via AI' to stage polite PayPal reminders.`;
