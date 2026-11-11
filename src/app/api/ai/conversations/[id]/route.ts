@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentMerchant } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { extractActionCards } from "@/lib/ai/orchestrator";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -70,11 +71,14 @@ export async function GET(request: Request, { params }: RouteParams) {
         }
       }
 
+      const actionCards = toolCalls && Array.isArray(toolCalls) ? extractActionCards(toolCalls) : undefined;
+
       return {
         id: log.id,
         role: log.role as "user" | "assistant",
         content: log.content,
         toolCalls,
+        actionCards,
         latencyMs: log.latencyMs,
         timestamp: new Date(log.createdAt).toLocaleTimeString([], {
           hour: "2-digit",

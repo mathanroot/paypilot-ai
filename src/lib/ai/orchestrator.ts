@@ -57,46 +57,58 @@ export interface AgentExecutionResult {
 export function extractActionCards(toolCalls: Array<{ name: string; args: any; result: any }>): AgentActionCard[] {
   const cards: AgentActionCard[] = [];
   for (const tc of toolCalls) {
-    if (tc.name === "create_invoice" && tc.result?.invoice) {
-      const inv = tc.result.invoice;
+    if (tc.name === "create_invoice" && (tc.result?.invoice || tc.result?.invoiceNumber)) {
+      const inv = tc.result.invoice || tc.result;
+      const invNumber = inv.invoiceNumber;
+      const custName = inv.customer?.name || inv.customerName || "Client";
+      const amt = Number(inv.amount || 0);
+      const curr = inv.currency || "USD";
+      const pLink = inv.paymentLink || inv.approvalUrl;
+      const phone = inv.customer?.phone || inv.customerPhone;
+
       const waUrl = generateWhatsAppReminderUrl({
-        phone: inv.customer?.phone,
-        customerName: inv.customer?.name || "Client",
-        invoiceNumber: inv.invoiceNumber,
-        amount: Number(inv.amount),
-        currency: inv.currency || "USD",
-        paymentLink: inv.paymentLink,
+        phone,
+        customerName: custName,
+        invoiceNumber: invNumber,
+        amount: amt,
+        currency: curr,
+        paymentLink: pLink,
         daysOverdue: 0,
       });
 
       cards.push({
         type: "INVOICE",
-        title: `Invoice ${inv.invoiceNumber}`,
-        subtitle: `Client: ${inv.customer?.name || "Client"} • $${Number(inv.amount).toFixed(2)} USD`,
-        amount: Number(inv.amount),
-        currency: inv.currency || "USD",
-        link: inv.paymentLink,
+        title: `Invoice ${invNumber}`,
+        subtitle: `Client: ${custName} • $${amt.toFixed(2)} ${curr}`,
+        amount: amt,
+        currency: curr,
+        link: pLink,
         actionLabel: "Pay with PayPal",
-        actionUrl: inv.paymentLink,
+        actionUrl: pLink,
         whatsappUrl: waUrl,
       });
-    } else if (tc.name === "create_paypal_order" && tc.result?.orderId) {
+    } else if (tc.name === "create_paypal_order" && (tc.result?.paypalOrderId || tc.result?.orderId)) {
+      const orderId = tc.result.paypalOrderId || tc.result.orderId;
+      const amt = Number(tc.result.amount || 0);
+      const curr = tc.result.currency || "USD";
+      const approveUrl = tc.result.approvalUrl || tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${orderId}`;
+
       const waUrl = generateWhatsAppOrderUrl({
-        orderId: tc.result.orderId,
-        amount: Number(tc.result.amount),
-        currency: tc.result.currency || "USD",
-        checkoutUrl: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+        orderId,
+        amount: amt,
+        currency: curr,
+        checkoutUrl: approveUrl,
       });
 
       cards.push({
         type: "CHECKOUT",
-        title: `PayPal Sandbox Order #${tc.result.orderId}`,
-        subtitle: `$${Number(tc.result.amount).toFixed(2)} ${tc.result.currency || "USD"} direct checkout order ready`,
-        amount: Number(tc.result.amount),
-        currency: tc.result.currency || "USD",
-        link: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+        title: `PayPal Sandbox Order #${orderId}`,
+        subtitle: `$${amt.toFixed(2)} ${curr} direct checkout order ready`,
+        amount: amt,
+        currency: curr,
+        link: approveUrl,
         actionLabel: "Open PayPal Checkout",
-        actionUrl: tc.result.approveUrl || `https://www.sandbox.paypal.com/checkoutnow?token=${tc.result.orderId}`,
+        actionUrl: approveUrl,
         whatsappUrl: waUrl,
       });
     } else if (tc.name === "stage_refund" && tc.result?.approvalId) {

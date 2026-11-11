@@ -20,6 +20,7 @@ import {
   FileText,
   FileSpreadsheet,
   Table,
+  MessageCircle,
 } from "lucide-react";
 import { exportToPdf, exportToExcel, exportToCsv, parseFinancialContent } from "@/lib/exportUtils";
 
@@ -473,22 +474,40 @@ function renderBodyMarkdown(text: string) {
       );
     }
 
-    // Check if paragraph contains PayPal Checkout URL link -> render rich action button
+    // Check if paragraph contains PayPal Checkout URL link -> render rich action button & WhatsApp dispatch
     const linkMatch = trimmed.match(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/);
-    if (linkMatch && linkMatch[2].includes("paypal.com")) {
+    if (linkMatch && (linkMatch[2].includes("paypal.com") || linkMatch[2].includes("/checkout"))) {
       const [_, label, url] = linkMatch;
+      const waText = encodeURIComponent(
+        `👋 Hello! Here is your official PayPal payment link:\n${url}\n\nPlease let us know once payment is completed. Thank you!`
+      );
+      const waUrl = `https://api.whatsapp.com/send?text=${waText}`;
+
       return (
         <div key={idx} className="p-3.5 rounded-xl bg-[#0A1024] border border-secondary/40 space-y-2.5 my-2">
           <p className="text-xs text-slate-300">{renderInlineMarkdown(trimmed.replace(linkMatch[0], ""))}</p>
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white font-semibold text-xs shadow-lg transition-all"
-          >
-            <span>{label || "Open PayPal Sandbox Checkout"}</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#0070BA] to-[#003087] hover:brightness-110 text-white font-semibold text-xs shadow-lg transition-all"
+            >
+              <span>{label || "Open PayPal Sandbox Checkout"}</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-500/20 transition-all"
+              title="Dispatch direct payment link on WhatsApp"
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              <span>Send on WhatsApp</span>
+            </a>
+          </div>
         </div>
       );
     }

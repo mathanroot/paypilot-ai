@@ -26,6 +26,7 @@ import {
   X,
   RefreshCw,
   Grid,
+  MessageCircle,
 } from "lucide-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -408,6 +409,16 @@ export default function InvoicesPage() {
                   <Copy className="w-3.5 h-3.5" />
                 )}
               </button>
+
+              <a
+                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Hello ${inv.customer?.name || "Client"}, here is your PayPal invoice link for ${inv.invoiceNumber} ($${Number(inv.amount).toFixed(2)} USD): ${inv.paymentLink || "https://paypilot-ai-dpui.onrender.com/invoices"}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white transition-all shadow-sm"
+                title="Share invoice with customer on WhatsApp"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+              </a>
             </div>
           );
         },
@@ -704,6 +715,17 @@ export default function InvoicesPage() {
                                   <Copy className="w-3.5 h-3.5" />
                                 )}
                               </button>
+
+                              {/* Share on WhatsApp */}
+                              <a
+                                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Hello ${inv.customer?.name || "Client"}, here is your PayPal invoice link for ${inv.invoiceNumber} ($${Number(inv.amount).toFixed(2)} USD): ${inv.paymentLink || "https://paypilot-ai-dpui.onrender.com/invoices"}`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white transition-all shadow-sm"
+                                title="Share invoice with customer on WhatsApp"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </a>
                             </div>
                           )}
                         </div>
